@@ -66,19 +66,14 @@ impl VehicleRL {
         }
     }
 
-    pub fn update_vehicle_second(
-        &mut self,
-        collision_world: &mut DiscreteDynamicsWorld,
-        step: f32,
-    ) {
-        let chassis = &mut collision_world.bodies_mut()[self.chassis_body_idx];
+    pub fn update_vehicle_second(&mut self, cb: &mut RigidBody, step: f32) {
         for wheel in &mut self.wheels {
-            wheel.update_suspension(chassis, step);
+            wheel.update_suspension(cb, step);
         }
 
         // note: all suspension MUST be updated before impulses are applied
         for wheel in &mut self.wheels {
-            wheel.apply_friction_impulses(chassis, step);
+            wheel.apply_friction_impulses(cb, step);
         }
     }
 }

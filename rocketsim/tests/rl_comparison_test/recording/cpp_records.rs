@@ -111,28 +111,6 @@ impl From<ControlsRecord> for CarControls {
     }
 }
 
-#[repr(u8)]
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub enum ImpulseRecordType {
-    WheelsSuspension,
-    WheelsFriction,
-    StickyForce,
-    Jump,
-    DoubleJump,
-    DodgeImpulse,
-    DodgeTorque,
-    AirControl,
-    Boost,
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub struct ImpulseRecord {
-    pub lin_impulse: VecRecord,
-    pub ang_impulse: VecRecord,
-    pub impulse_type: ImpulseRecordType,
-    pub is_accum: bool,
-}
-
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct PhysRecord {
@@ -146,14 +124,6 @@ pub struct PhysRecord {
     pub has_world_contact: bool,
     pub world_contact_point: VecRecord,
     pub world_contact_normal: VecRecord,
-
-    impulse_records_data: [ImpulseRecord; 8],
-    num_impulse_records: u32,
-}
-impl PhysRecord {
-    pub fn impulse_records(&self) -> &[ImpulseRecord] {
-        &self.impulse_records_data[..self.num_impulse_records as usize]
-    }
 }
 impl From<PhysRecord> for PhysState {
     fn from(phys_record: PhysRecord) -> Self {
@@ -213,10 +183,17 @@ pub struct CarRecord {
 }
 impl From<CarRecord> for CarState {
     fn from(phys_record: CarRecord) -> Self {
+        // Map double_jumped_or_flipped:
+        // - If currently flipping (is_flipping=true), the second action was a flip
+        // - Otherwise it was a double jump
+        let double_jumped = phys_record.double_jumped_or_flipped && !phys_record.is_flipping;
+        let flipped = phys_record.double_jumped_or_flipped && phys_record.is_flipping;
+
         Self {
             phys: phys_record.phys.into(),
             boost: phys_record.boost_amount,
             controls: phys_record.prev_controls.into(),
+            prev_controls: phys_record.prev_controls.into(),
             is_on_ground: phys_record.is_on_ground,
             is_jumping: phys_record.is_jumping,
             is_flipping: phys_record.is_flipping,
@@ -224,6 +201,8 @@ impl From<CarRecord> for CarState {
             jump_time: phys_record.jump_time,
             flip_time: phys_record.flip_time,
             has_jumped: phys_record.has_jumped,
+            has_double_jumped: double_jumped,
+            has_flipped: flipped,
             ..Default::default()
         }
     }

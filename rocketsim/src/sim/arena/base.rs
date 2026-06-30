@@ -1,3 +1,9 @@
+use std::{any::Any, f32::consts::PI, iter::repeat_n, mem};
+
+use arrayvec::ArrayVec;
+use fastrand::Rng;
+use glam::{Affine3A, EulerRot, Mat3A, Vec3A};
+
 use super::ArenaContactTracker;
 use crate::shared::rsmath;
 use crate::shared::rsmath::VecQuantizeMode;
@@ -27,12 +33,6 @@ use crate::{
         DemoMode, UserInfoTypes, arena::ArenaEventList,
     },
 };
-use arrayvec::ArrayVec;
-use fastrand::Rng;
-use glam::{Affine3A, EulerRot, Mat3A, Vec3A};
-#[cfg(debug_assertions)]
-use indexmap::IndexMap;
-use std::{any::Any, f32::consts::PI, iter::repeat_n, mem};
 
 pub trait Vis: Send + Sync + Any {
     fn update(&mut self, arena_state: &ArenaState, dt: f32);
@@ -470,10 +470,6 @@ impl Arena {
     pub fn step_tick(&mut self) -> &[ArenaEvent] {
         self.events.clear();
 
-        // NOTE: This needs to be called manually
-        // TODO: Make it not need to be called manually
-        self.bullet_world.clear_accum_forces();
-
         // Limit velocities, then quantize physics values
         {
             use consts::{ball, car, quantize};
@@ -590,8 +586,8 @@ impl Arena {
         self.contact_tracker.clear_records();
 
         for car in &mut self.cars {
-            car.post_tick_update(&mut self.bullet_world);
             let rb = &mut self.bullet_world.bodies_mut()[car.rigid_body_idx];
+            car.post_tick_update(rb);
             car.finish_physics_tick(rb);
 
             if let Some(boost_pad_grid) = self.boost_pad_grid.as_mut() {
@@ -644,6 +640,10 @@ impl Arena {
     #[inline]
     pub const fn mutator_config(&self) -> &MutatorConfig {
         &self.config.mutators
+    }
+
+    pub fn set_mutator_config(&mut self, config: MutatorConfig) {
+        self.config.mutators = config;
     }
 
     pub fn set_ball_state(&mut self, ball_state: BallState) {
@@ -891,14 +891,11 @@ impl Arena {
         manifold_point: &ManifoldPoint,
         ball_is_body_a: bool,
     ) {
-        let ball_rb = &mut self.bullet_world.bodies_mut()[self.ball.rigid_body_idx];
-        let ball_accum_vel_before = ball_rb.accum_lin_vel;
         self.ball.on_hit(
             &self.cars[car_idx],
             self.config.game_mode,
             &self.config.mutators,
             self.tick_count,
-            ball_rb,
         );
 
         let contact_point = if ball_is_body_a {
@@ -907,7 +904,9 @@ impl Arena {
             manifold_point.pos_world_on_b
         } * BT_TO_UU;
 
-        let extra_hit_vel = (ball_rb.accum_lin_vel - ball_accum_vel_before) * BT_TO_UU;
+        // TODO: Somewhat hacky
+        let extra_hit_vel = self.ball.vel_impulse_cache;
+
         self.events.push(ArenaEvent::CarHitBall(CarHitBallEvent {
             car_idx,
             contact_point,
@@ -1037,15 +1036,5 @@ impl Arena {
                 is_demo,
             }));
         }
-    }
-
-    #[cfg(debug_assertions)]
-    pub fn get_car_impulse_history(
-        &self,
-        car_idx: usize,
-    ) -> &IndexMap<(&'static str, bool), (Vec3A, Vec3A)> {
-        let car_rb_index = self.cars[car_idx].rigid_body_idx;
-        let rb = &self.bullet_world.bodies()[car_rb_index];
-        &rb.dbg_tick_impulse_history
     }
 }

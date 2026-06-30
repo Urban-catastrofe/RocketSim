@@ -6,7 +6,9 @@ members = [
   "rocketsim",
   "rocketsim_derive",
   "rocketsim_vis",
+  "rocketsim-bridge",
 ]
+default-members = ["rocketsim"]
 
 [workspace.dependencies]
 glam = { version = "0.33.0", features = ["debug-glam-assert"] }
@@ -20,7 +22,6 @@ debug = true
 lto = true
 panic = "abort"
 
-# TODO: Temporary
 [profile.test]
 opt-level = 0
 debug = true

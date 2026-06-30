@@ -2,9 +2,6 @@ use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, N
 
 use glam::{Affine3A, Mat3A, Quat, Vec3A};
 
-#[cfg(debug_assertions)]
-use indexmap::IndexMap;
-
 use crate::{
     bullet::{
         collision::shapes::collision_shape::CollisionShapes,
@@ -132,10 +129,10 @@ pub struct RigidBody {
     world_quat: Quat,
     shape: CollisionShapes,
     activation: ActivationState,
-    broadphase_handle: usize,
 
     pub interp_world_trans: Affine3A,
     pub contact_processing_threshold: f32,
+    broadphase_handle: usize,
 
     pub collision_flags: u8,
     pub companion_id: Option<usize>,
@@ -162,10 +159,6 @@ pub struct RigidBody {
     pub linear_sleeping_threshold: f32,
     pub angular_sleeping_threshold: f32,
     pub inv_mass_splat: Vec3A,
-
-    /// For debugging physics, this tracks every impulse applied during a tick
-    #[cfg(debug_assertions)]
-    pub dbg_tick_impulse_history: IndexMap<(&'static str, bool), (Vec3A, Vec3A)>,
 }
 
 impl RigidBody {
@@ -219,9 +212,6 @@ impl RigidBody {
             linear_sleeping_threshold,
             angular_sleeping_threshold,
             inv_mass_splat: Vec3A::splat(inverse_mass),
-
-            #[cfg(debug_assertions)]
-            dbg_tick_impulse_history: IndexMap::new(),
         }
     }
 
@@ -310,13 +300,7 @@ impl RigidBody {
     /// `accum`: Accumulate this impulse to be applied while
     /// stepping the simulation (instead of immediately)
     #[inline(always)] // Should assure const evaluation
-    pub fn add_impulse(
-        &mut self,
-        name: Option<&'static str>,
-        impulse: Impulse,
-        massed: bool,
-        accum: bool,
-    ) {
+    pub fn add_impulse(&mut self, impulse: Impulse, massed: bool, accum: bool) {
         let mut lin_impulse = Vec3A::ZERO;
         let mut ang_impulse = Vec3A::ZERO;
 
@@ -347,17 +331,6 @@ impl RigidBody {
             self.accum_ang_vel += ang_impulse;
         } else {
             self.ang_vel += ang_impulse;
-        }
-
-        #[cfg(debug_assertions)]
-        if let Some(name) = name {
-            let map = &mut self.dbg_tick_impulse_history;
-            if let Some((lin, ang)) = map.get_mut(&(name, accum)) {
-                *lin += lin_impulse;
-                *ang += ang_impulse;
-            } else {
-                map.insert((name, accum), (lin_impulse, ang_impulse));
-            }
         }
     }
 
@@ -408,11 +381,9 @@ impl RigidBody {
         }
     }
 
-    pub fn clear_accum_vels(&mut self) {
+    pub const fn clear_accum_vels(&mut self) {
         self.accum_lin_vel = Vec3A::ZERO;
         self.accum_ang_vel = Vec3A::ZERO;
-        #[cfg(debug_assertions)]
-        self.dbg_tick_impulse_history.clear();
     }
 
     pub fn get_mass(&self) -> f32 {

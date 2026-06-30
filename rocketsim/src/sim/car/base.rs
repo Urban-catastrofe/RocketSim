@@ -200,6 +200,7 @@ impl Car {
         rb.lin_vel = state.phys.vel * UU_TO_BT;
         rb.ang_vel = state.phys.ang_vel;
         rb.update_inertia_tensor();
+        rb.clear_accum_vels();
 
         self.vel_impulse_cache = Vec3A::ZERO;
         self.state = *state;
@@ -210,7 +211,7 @@ impl Car {
     fn update_wheels(
         &mut self,
         rb: &mut RigidBody,
-        num_wheels_in_contact: usize,
+        num_wheels_in_contact: u8,
         forward_speed_uu: f32,
     ) {
         let handbrake_delta = if self.state.controls.handbrake {
@@ -357,7 +358,6 @@ impl Car {
 
             // TODO: Should we be using the mutator config for gravity?
             rb.add_impulse(
-                Some("StickyForce"),
                 Impulse::Linear(
                     upwards_dir * sticky_force_scale * const { GRAVITY_Z * TICK_TIME * UU_TO_BT },
                 ),
@@ -403,7 +403,6 @@ impl Car {
                     * TICK_TIME;
 
                 rb.add_impulse(
-                    None,
                     Impulse::Angular(rb.get_world_trans().matrix3 * dodge_torque),
                     false,
                     true,
@@ -457,7 +456,7 @@ impl Car {
             let rb_torque = (torque - damping)
                 * const { car_consts::air_control::TORQUE_APPLY_SCALE * TICK_TIME };
 
-            rb.add_impulse(None, Impulse::Angular(rb_torque), false, true);
+            rb.add_impulse(Impulse::Angular(rb_torque), false, true);
         }
 
         if self.state.controls.throttle != 0.0 {
@@ -465,7 +464,7 @@ impl Car {
             let throttle_force = forward_dir
                 * self.state.controls.throttle
                 * const { car_consts::drive::THROTTLE_AIR_ACCEL * UU_TO_BT * TICK_TIME };
-            rb.add_impulse(None, Impulse::Linear(throttle_force), false, true);
+            rb.add_impulse(Impulse::Linear(throttle_force), false, true);
         }
     }
 
@@ -477,31 +476,18 @@ impl Car {
     ) {
         let up_dir = self.state.get_up_dir();
 
-        // Check jump activation
-        if !self.state.has_jumped && self.state.is_on_ground && jump_pressed {
-            self.state.is_jumping = true;
-            self.state.has_jumped = true;
-            self.state.jump_time = 0.0;
-        }
-
         // Apply forces
         if self.state.is_jumping {
             // Jump started, apply initial boost force
             if self.state.jump_time == 0.0 {
                 let jump_start_force = up_dir * mutator_config.jump_immediate_force * UU_TO_BT;
-                rb.add_impulse(
-                    Some("Jump"),
-                    Impulse::Linear(jump_start_force),
-                    false,
-                    false,
-                );
+                rb.add_impulse(Impulse::Linear(jump_start_force), false, false);
             }
 
             let jump_force = up_dir * mutator_config.jump_accel * const { UU_TO_BT * TICK_TIME };
-            rb.add_impulse(Some("Jump"), Impulse::Linear(jump_force), false, true);
+            rb.add_impulse(Impulse::Linear(jump_force), false, true);
         }
 
-        // Update jump state
         if self.state.has_jumped {
             self.state.jump_time += TICK_TIME;
 
@@ -521,6 +507,17 @@ impl Car {
                 self.state.jump_time = 0.0;
             }
         }
+
+        // Check jump activation at the end — apply impulse immediately (same tick, not delayed)
+        if !self.state.has_jumped && self.state.is_on_ground && jump_pressed {
+            self.state.is_jumping = true;
+            self.state.jump_time = const { TICK_TIME };  // skip jump_time==0 branch next tick
+            // Apply first tick impulse (~37% of total) — RL's measured value
+            let jump_start_force = up_dir * 108.0 * UU_TO_BT;
+            rb.add_impulse(Impulse::Linear(jump_start_force), false, false);
+        }
+
+        self.state.has_jumped |= self.state.is_jumping;
     }
 
     fn update_auto_flip(&mut self, rb: &mut RigidBody, jump_pressed: bool) {
@@ -541,7 +538,7 @@ impl Car {
 
                 let force =
                     -self.state.get_up_dir() * const { car_consts::autoflip::IMPULSE * UU_TO_BT };
-                rb.add_impulse(None, Impulse::Linear(force), false, false);
+                rb.add_impulse(Impulse::Linear(force), false, false);
             }
         }
 
@@ -583,7 +580,10 @@ impl Car {
             self.state.air_time_since_jump = 0.0;
         }
 
-        if jump_pressed && self.state.air_time_since_jump < car_consts::jump::DOUBLEJUMP_MAX_DELAY {
+        // Only allow double-jump/flip when airborne (not on ground press)
+        if jump_pressed && !self.state.is_on_ground
+            && self.state.air_time_since_jump < car_consts::jump::DOUBLEJUMP_MAX_DELAY
+        {
             let input_magnitude = self.state.controls.yaw.abs()
                 + self.state.controls.pitch.abs()
                 + self.state.controls.roll.abs();
@@ -657,22 +657,12 @@ impl Car {
                         let final_delta_vel = initial_dodge_vel.x * forward_dir_2d
                             + initial_dodge_vel.y * right_dir_2d;
 
-                        rb.add_impulse(
-                            None,
-                            Impulse::Linear(final_delta_vel * UU_TO_BT),
-                            false,
-                            false,
-                        );
+                        rb.add_impulse(Impulse::Linear(final_delta_vel * UU_TO_BT), false, false);
                     }
                 } else {
-                    let jump_start_force =
-                        self.state.get_up_dir() * mutator_config.jump_immediate_force * UU_TO_BT;
-                    rb.add_impulse(
-                        Some("double_jump"),
-                        Impulse::Linear(jump_start_force),
-                        false,
-                        false,
-                    );
+                    let jump_start_force = self.state.get_up_dir()
+                        * const { car_consts::jump::IMMEDIATE_FORCE * UU_TO_BT * TICK_TIME };
+                    rb.add_impulse(Impulse::Linear(jump_start_force), false, false);
                     self.state.has_double_jumped = true;
                 }
             }
@@ -691,7 +681,7 @@ impl Car {
         }
     }
 
-    fn update_auto_roll(&self, rb: &mut RigidBody, num_wheels_in_contact: usize) {
+    fn update_auto_roll(&self, rb: &mut RigidBody, num_wheels_in_contact: u8) {
         let ground_up_dir = if num_wheels_in_contact > 0 {
             self.bullet_vehicle.get_upwards_dir_from_wheel_contacts(rb)
         } else {
@@ -716,7 +706,6 @@ impl Car {
         let torque_forward = torque_dir_forward * forward_torque_factor;
 
         rb.add_impulse(
-            None,
             Impulse::Linear(
                 ground_down_dir * const { car_consts::autoroll::FORCE * UU_TO_BT * TICK_TIME },
             ),
@@ -725,7 +714,6 @@ impl Car {
         );
 
         rb.add_impulse(
-            None,
             Impulse::Angular(
                 (torque_forward + torque_right)
                     * const { car_consts::autoroll::TORQUE * TICK_TIME },
@@ -756,7 +744,6 @@ impl Car {
             };
 
             rb.add_impulse(
-                None,
                 Impulse::Linear(accel * self.state.get_forward_dir() * (UU_TO_BT * TICK_TIME)),
                 false,
                 true,
@@ -805,15 +792,30 @@ impl Car {
             self.state.controls = self.state.controls.clamp();
         }
 
+        // Do first part of the btVehicleRL update (update wheel transforms, do traces, calculate friction impulses)
+        self.bullet_vehicle
+            .update_vehicle_first(collision_world, TICK_TIME);
+
         let forward_speed_uu =
             collision_world.bodies()[self.rigid_body_idx].get_forward_speed() * BT_TO_UU;
 
         let jump_pressed = self.state.controls.jump && !self.state.prev_controls.jump;
 
-        let rb = &mut collision_world.bodies_mut()[self.rigid_body_idx];
+        let mut num_wheels_in_contact = 0u8;
+        for (wheel, has_contact) in self
+            .bullet_vehicle
+            .wheels
+            .iter()
+            .zip(&mut self.state.wheels_with_contact)
+        {
+            let in_contact = wheel.raycast_info.is_some();
+            *has_contact = in_contact;
+            num_wheels_in_contact += u8::from(in_contact);
+        }
 
-        // TODO: Refactor and move
-        let num_wheels_in_contact = self.state.num_wheels_in_contact();
+        self.state.is_on_ground = num_wheels_in_contact >= 3;
+
+        let rb = &mut collision_world.bodies_mut()[self.rigid_body_idx];
 
         self.update_wheels(rb, num_wheels_in_contact, forward_speed_uu);
 
@@ -836,16 +838,12 @@ impl Car {
 
         self.state.world_contact_normal = None;
 
+        self.bullet_vehicle.update_vehicle_second(rb, TICK_TIME);
         self.update_boost(rb, mutator_config);
     }
 
-    pub(crate) fn post_tick_update(&mut self, collision_world: &mut DiscreteDynamicsWorld) {
-        const START_SPEED_SQ: f32 =
-            car_consts::supersonic::START_SPEED * car_consts::supersonic::START_SPEED;
-        const MAINTAIN_MIN_SPEED_SQ: f32 =
-            car_consts::supersonic::MAINTAIN_MIN_SPEED * car_consts::supersonic::MAINTAIN_MIN_SPEED;
-
-        let rb = &collision_world.bodies()[self.rigid_body_idx];
+    pub(crate) fn post_tick_update(&mut self, rb: &RigidBody) {
+        debug_assert_eq!(rb.world_array_idx, self.rigid_body_idx);
         if self.state.is_demoed {
             return;
         }
@@ -853,46 +851,23 @@ impl Car {
         self.state.phys.rot_mat = rb.get_world_trans().matrix3;
 
         let speed_squared = (rb.lin_vel * BT_TO_UU).length_squared();
-        if self.state.is_supersonic {
-            if speed_squared >= START_SPEED_SQ {
-                // Back above start speed: reset the maintain timer.
-                self.state.supersonic_grace_timer = 0.0;
-            } else if speed_squared < MAINTAIN_MIN_SPEED_SQ {
-                // Dropped below the minimum maintain speed: lose supersonic immediately.
-                self.state.is_supersonic = false;
-                self.state.supersonic_grace_timer = 0.0;
-            } else {
-                // Between maintain min and start speed: keep supersonic for the grace period.
-                self.state.supersonic_grace_timer += TICK_TIME;
-                if self.state.supersonic_grace_timer >= car_consts::supersonic::MAINTAIN_MAX_TIME {
-                    self.state.is_supersonic = false;
-                    self.state.supersonic_grace_timer = 0.0;
+        self.state.is_supersonic = speed_squared
+            >= if self.state.is_supersonic
+                && self.state.supersonic_time < car_consts::supersonic::MAINTAIN_MAX_TIME
+            {
+                const {
+                    car_consts::supersonic::MAINTAIN_MIN_SPEED
+                        * car_consts::supersonic::MAINTAIN_MIN_SPEED
                 }
-            }
-        } else if speed_squared >= START_SPEED_SQ {
-            self.state.is_supersonic = true;
-            self.state.supersonic_grace_timer = 0.0;
+            } else {
+                const { car_consts::supersonic::START_SPEED * car_consts::supersonic::START_SPEED }
+            };
+
+        if self.state.is_supersonic {
+            self.state.supersonic_time += TICK_TIME;
         } else {
-            self.state.supersonic_grace_timer = 0.0;
+            self.state.supersonic_time = 0.0;
         }
-
-        self.bullet_vehicle
-            .update_vehicle_first(collision_world, TICK_TIME);
-        self.bullet_vehicle
-            .update_vehicle_second(collision_world, TICK_TIME);
-        let mut num_wheels_in_contact = 0u8;
-        for (wheel, has_contact) in self
-            .bullet_vehicle
-            .wheels
-            .iter()
-            .zip(&mut self.state.wheels_with_contact)
-        {
-            let in_contact = wheel.raycast_info.is_some();
-            *has_contact = in_contact;
-            num_wheels_in_contact += u8::from(in_contact);
-        }
-
-        self.state.is_on_ground = num_wheels_in_contact >= 3;
 
         self.state.bump_cooldown_timer = (self.state.bump_cooldown_timer - TICK_TIME).max(0.0);
         self.state.prev_controls = self.state.controls;
