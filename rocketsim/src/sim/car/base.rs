@@ -202,6 +202,14 @@ impl Car {
         rb.update_inertia_tensor();
         rb.clear_accum_vels();
 
+        // Clear stale wheel raycast data so update_wheels doesn't compute
+        // wrong friction from the previous tick's contact normals. The Bullet
+        // vehicle update will refresh contacts during step_simulation().
+        self.bullet_vehicle
+            .wheels
+            .iter_mut()
+            .for_each(|w| w.reset_wheel_suspension());
+
         self.vel_impulse_cache = Vec3A::ZERO;
         self.state = *state;
     }
@@ -476,44 +484,46 @@ impl Car {
     ) {
         let up_dir = self.state.get_up_dir();
 
-        // Apply forces
-        if self.state.is_jumping {
-            // Jump started, apply initial boost force
-            if self.state.jump_time == 0.0 {
-                let jump_start_force = up_dir * mutator_config.jump_immediate_force * UU_TO_BT;
-                rb.add_impulse(Impulse::Linear(jump_start_force), false, false);
-            }
-
-            let jump_force = up_dir * mutator_config.jump_accel * const { UU_TO_BT * TICK_TIME };
-            rb.add_impulse(Impulse::Linear(jump_force), false, true);
-        }
-
         if self.state.has_jumped {
+            // Only apply the second-tick impulse if we're still in the
+            // initial jump phase (jump_time was below MIN_TIME before
+            // this tick). This prevents re-triggering when recordings
+            // restore jump_time=0 on free-flight frames.
+            let was_in_jump_phase = self.state.jump_time < car_consts::jump::MIN_TIME;
+
             self.state.jump_time += TICK_TIME;
 
-            // Update is_jumping
-            self.state.is_jumping = self.state.jump_time < car_consts::jump::MIN_TIME
-                || (self.state.controls.jump && self.state.jump_time < car_consts::jump::MAX_TIME);
+            // RL ends is_jumping at liftoff (~MIN_TIME ticks), not when
+            // the button is released. Only keep is_jumping true if it
+            // was already true — never re-activate mid-flight.
+            self.state.is_jumping = self.state.is_jumping
+                && !self.state.is_on_ground
+                && self.state.jump_time < car_consts::jump::MIN_TIME;
 
-            // Possibly reset `has_jumped`
+            // Apply the remaining 63% of jump impulse on the first
+            // post-activation tick, matching RL's 2-tick split.
+            if self.state.is_jumping && was_in_jump_phase {
+                let jump_impulse =
+                    up_dir * (mutator_config.jump_immediate_force * 0.63) * UU_TO_BT;
+                rb.add_impulse(Impulse::Linear(jump_impulse), false, false);
+            }
+
+            // Reset has_jumped on landing
             if self.state.is_on_ground
                 && self.state.jump_time
                     > const { car_consts::jump::MIN_TIME + car_consts::jump::RESET_TIME_PAD }
             {
-                // Don't reset the jump just yet, we might still be leaving the ground
-                // This fixes the bug where jump is reset before we actually leave the ground after a minimum-time jump
-                // TODO: RL does something similar to this time-pad, but not exactly the same
                 self.state.has_jumped = false;
                 self.state.jump_time = 0.0;
             }
         }
 
-        // Check jump activation at the end — apply impulse immediately (same tick, not delayed)
+        // Jump activation — apply first-tick impulse (37% of total).
         if !self.state.has_jumped && self.state.is_on_ground && jump_pressed {
             self.state.is_jumping = true;
-            self.state.jump_time = const { TICK_TIME };  // skip jump_time==0 branch next tick
-            // Apply first tick impulse (~37% of total) — RL's measured value
-            let jump_start_force = up_dir * 108.0 * UU_TO_BT;
+            self.state.jump_time = const { TICK_TIME };
+            let jump_start_force =
+                up_dir * (mutator_config.jump_immediate_force * 0.37) * UU_TO_BT;
             rb.add_impulse(Impulse::Linear(jump_start_force), false, false);
         }
 

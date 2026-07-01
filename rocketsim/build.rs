@@ -21,7 +21,10 @@ fn generate_comparison_tests() {
                 }
 
                 let file_name = path.file_stem().unwrap().to_str().unwrap();
-                let test_name = file_name.trim().replace('-', "_");
+                // Sanitize: replace anything that isn't alphanumeric or _ with _
+                let test_name: String = file_name.trim().chars().map(|c| {
+                    if c.is_alphanumeric() || c == '_' { c } else { '_' }
+                }).collect();
 
                 test_code.push_str(&format!(
                     "#[test] fn case_{}() {{ run_comparison_test(\"{}\", include_bytes!(r\"{}\")); }}",

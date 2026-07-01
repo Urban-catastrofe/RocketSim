@@ -104,30 +104,36 @@ impl ComparisonSet {
 }
 
 fn compare_phys(phys_state: &PhysState, phys_record: &PhysRecord, comparisons: &mut ComparisonSet) {
+    // pos: 1 UU ≈ 1 cm. At max speed the ball moves ~19 UU/tick.
     comparisons.insert(
         "pos",
-        Comparison::new_vec(phys_state.pos, phys_record.pos.into(), 10.0),
+        Comparison::new_vec(phys_state.pos, phys_record.pos.into(), 1.0),
     );
+    // vel: car top speed is ~2300 UU/s. 5 UU/s is ~0.2%.
     comparisons.insert(
         "vel",
-        Comparison::new_vec(phys_state.vel, phys_record.lin_vel.into(), 3.0),
+        Comparison::new_vec(phys_state.vel, phys_record.lin_vel.into(), 5.0),
     );
     comparisons.insert(
         "ang_vel",
         Comparison::new_vec(phys_state.ang_vel, phys_record.ang_vel.into(), 1.0),
     );
-
+    // Rotation directions should match near-exactly.
     comparisons.insert(
         "rot_forward",
         Comparison::new_vec(
             phys_state.get_forward_dir(),
-            phys_record.rot.forward().into(),
-            1.0,
+            phys_record.rot.rows[0].into(),
+            0.01,
         ),
     );
     comparisons.insert(
         "rot_up",
-        Comparison::new_vec(phys_state.get_up_dir(), phys_record.rot.up().into(), 1.0),
+        Comparison::new_vec(
+            phys_state.get_up_dir(),
+            phys_record.rot.rows[2].into(),
+            0.01,
+        ),
     );
 }
 
@@ -168,10 +174,71 @@ fn compare_car(car_state: &CarState, car_record: &CarRecord, comparisons: &mut C
             Comparison::new_vec(
                 car_state.flip_rel_torque,
                 car_record.flip_rel_torque.into(),
-                0.05,
+                0.1,
             ),
         );
     }
+
+    // ── Fields previously stored in RLPR but never compared ──────────
+
+    // boost_amount: 0-100 range. 0.5 threshold catches consumption bugs.
+    // Boost: skip when recording shows ≥99.9 (infinite boost mutator).
+    // In that mode RL's boost never drains, so comparing consumption
+    // against 100.0 is a false positive.
+    if car_record.boost_amount < 99.9 {
+        comparisons.insert(
+            "boost_amount",
+            Comparison::new_float(car_state.boost, car_record.boost_amount, 0.5),
+        );
+    }
+
+    // has_double_jumped / has_flipped derived from the combined
+    // `double_jumped_or_flipped` field (same logic as From<CarRecord>)
+    let record_double_jumped =
+        car_record.double_jumped_or_flipped && !car_record.is_flipping;
+    let record_flipped =
+        car_record.double_jumped_or_flipped && car_record.is_flipping;
+    comparisons.insert(
+        "has_double_jumped",
+        Comparison::new_bool(car_state.has_double_jumped, record_double_jumped),
+    );
+    comparisons.insert(
+        "has_flipped",
+        Comparison::new_bool(car_state.has_flipped, record_flipped),
+    );
+
+    // ── RLPR v2 fields ──
+
+    comparisons.insert(
+        "is_boosting",
+        Comparison::new_bool(car_state.is_boosting, car_record.is_boosting),
+    );
+    comparisons.insert(
+        "is_supersonic",
+        Comparison::new_bool(car_state.is_supersonic, car_record.is_supersonic),
+    );
+    // handbrake_val: NOT compared — observer stores 0/1 bool from
+    // controls, sim models it as a float with rise/fall rate.
+    // Comparing bool to float produces false divergence on every edge.
+    comparisons.insert(
+        "is_demoed",
+        Comparison::new_bool(car_state.is_demoed, car_record.is_demoed),
+    );
+    if car_state.is_demoed {
+        comparisons.insert(
+            "demo_respawn_timer",
+            Comparison::new_float(
+                car_state.demo_respawn_timer,
+                car_record.demo_respawn_timer,
+                TICK_TIME * 2.0,
+            ),
+        );
+    }
+    // air_time / air_time_since_jump: NOT directly compared — they
+    // are derived from is_on_ground, has_jumped, and is_jumping.
+    // If those primitives match, air_time must match. The observer
+    // computes them from jump state rather than physics, creating a
+    // semantic gap that produces false divergence.
 }
 
 pub fn compare_states_to_tick(

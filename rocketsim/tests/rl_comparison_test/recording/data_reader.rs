@@ -31,24 +31,20 @@ impl<'a> DataReader<'a> {
     }
 
     pub unsafe fn read_struct_unsafe<T: Copy>(&mut self) -> io::Result<T> {
-        let expected_size = self.bytes.read_u32::<LittleEndian>()? as usize;
+        let size_prefix = self.bytes.read_u32::<LittleEndian>()? as usize;
         let struct_size = size_of::<T>();
 
-        if expected_size != struct_size {
+        if size_prefix != struct_size {
             return Err(io::Error::new(
                 ErrorKind::InvalidData,
                 format!(
-                    "Size mismatch reading struct '{}' (serialized={}, expected={})",
+                    "Size mismatch reading struct '{}' (serialized={size_prefix}, expected={struct_size})",
                     std::any::type_name::<T>(),
-                    expected_size,
-                    struct_size
                 ),
             ));
         }
 
         let mut obj = std::mem::MaybeUninit::<T>::zeroed();
-
-        // Oooooo scary! But not really since the worst case scenario is wrong-value primitives
         unsafe {
             let slice = std::slice::from_raw_parts_mut(obj.as_mut_ptr() as *mut u8, struct_size);
             self.bytes.read_exact(slice)?;

@@ -69,6 +69,7 @@ impl Mat3Record {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct WheelRecord {
+    // ── v1 fields ──
     pub susp_length: f32,
     pub susp_rel_vel: f32,
 
@@ -82,6 +83,10 @@ pub struct WheelRecord {
     pub lat_friction: f32,
     pub long_friction: f32,
     pub extra_pushback: f32,
+
+    // ── v2 fields (zero in v1 recordings) ──
+    pub spin_speed: f32,
+    pub friction_curve_input: f32,
 }
 
 #[repr(C)]
@@ -127,8 +132,13 @@ pub struct PhysRecord {
 }
 impl From<PhysRecord> for PhysState {
     fn from(phys_record: PhysRecord) -> Self {
-        // Verify rotation matrix is sane
-        {
+        // Verify rotation matrix is sane.
+        // If all rows are zero (padding record for a missing car), use identity.
+        let rows_all_zero = phys_record.rot.rows[0].length() < 1e-6
+            && phys_record.rot.rows[1].length() < 1e-6
+            && phys_record.rot.rows[2].length() < 1e-6;
+
+        if !rows_all_zero {
             for i in 0..3 {
                 let c_len = phys_record.rot.rows[i].length();
                 assert!((1.0 - c_len).abs() < 1e-6);
@@ -149,11 +159,19 @@ impl From<PhysRecord> for PhysState {
             pos: phys_record.pos.into(),
             vel: phys_record.lin_vel.into(),
             ang_vel: phys_record.ang_vel.into(),
-            rot_mat: Mat3A::from_cols(
-                phys_record.rot.column(0).into(),
-                phys_record.rot.column(1).into(),
-                phys_record.rot.column(2).into(),
-            ),
+            // The RLPR stores axis vectors in rows (row 0=forward, 1=right, 2=up).
+            // Mat3A::from_cols expects column vectors, so pass rows directly —
+            // column 0 becomes forward, column 1=right, column 2=up.
+            // If all rows are zero (padding record), fall back to identity.
+            rot_mat: if rows_all_zero {
+                Mat3A::IDENTITY
+            } else {
+                Mat3A::from_cols(
+                    phys_record.rot.rows[0].into(),
+                    phys_record.rot.rows[1].into(),
+                    phys_record.rot.rows[2].into(),
+                )
+            },
         }
     }
 }
@@ -161,6 +179,7 @@ impl From<PhysRecord> for PhysState {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct CarRecord {
+    // ── v1 fields ──
     pub phys: PhysRecord,
 
     pub is_on_ground: bool,
@@ -180,6 +199,15 @@ pub struct CarRecord {
     pub prev_controls: ControlsRecord,
 
     pub wheels: [WheelRecord; 4],
+
+    // ── v2 fields (zero in v1 recordings) ──
+    pub is_boosting: bool,
+    pub is_supersonic: bool,
+    pub is_demoed: bool,
+    pub handbrake_val: f32,
+    pub demo_respawn_timer: f32,
+    pub air_time: f32,
+    pub air_time_since_jump: f32,
 }
 impl From<CarRecord> for CarState {
     fn from(phys_record: CarRecord) -> Self {
@@ -203,6 +231,14 @@ impl From<CarRecord> for CarState {
             has_jumped: phys_record.has_jumped,
             has_double_jumped: double_jumped,
             has_flipped: flipped,
+            // ── v2 fields (zero in v1 recordings → fall back to defaults) ──
+            is_boosting: phys_record.is_boosting,
+            is_supersonic: phys_record.is_supersonic,
+            is_demoed: phys_record.is_demoed,
+            handbrake_val: phys_record.handbrake_val,
+            demo_respawn_timer: phys_record.demo_respawn_timer,
+            air_time: phys_record.air_time,
+            air_time_since_jump: phys_record.air_time_since_jump,
             ..Default::default()
         }
     }

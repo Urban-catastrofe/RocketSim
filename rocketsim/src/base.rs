@@ -104,9 +104,10 @@ pub fn init_from_mem(
 
     let _initializing_lock = INITIALIZING_MUTEX.lock();
 
-    if HAS_INITIALIZED_LOCK.set(()).is_ok() {
-        // Initialization locked successfully
-    } else {
+    // Check if already fully initialized (by a previous successful call).
+    // We defer setting HAS_INITIALIZED_LOCK until AFTER mesh loading succeeds,
+    // so a failed init doesn't poison subsequent callers.
+    if HAS_INITIALIZED_LOCK.get().is_some() {
         warn!("RocketSim initialized again, ignoring...");
         return Ok(());
     }
@@ -201,6 +202,10 @@ pub fn init_from_mem(
         *arena_collision_shapes_lock = Some(arena_collision_shapes);
         *arena_collision_mesh_files_lock = Some(arena_collision_mesh_files);
     }
+
+    // Only mark as initialized AFTER all data is set up, so a failed mesh
+    // load doesn't leave subsequent callers thinking init succeeded.
+    let _ = HAS_INITIALIZED_LOCK.set(());
 
     Ok(())
 }
