@@ -200,7 +200,14 @@ pub fn run_per_tick(recording: &Recording, cfg: &HarnessConfig) -> Report {
         return Report::new(recording.name.clone(), stride, num_cars, 0);
     }
 
-    let threads = cfg.threads.clamp(1, starts.len());
+    // Not worth sharding tiny recordings: thread + per-arena setup overhead
+    // exceeds the stepping cost. Parallelize only above a tick threshold.
+    const PARALLEL_MIN_TICKS: usize = 1024;
+    let threads = if starts.len() < PARALLEL_MIN_TICKS {
+        1
+    } else {
+        cfg.threads.clamp(1, starts.len())
+    };
     if threads <= 1 {
         return run_per_tick_shard(recording, &starts);
     }
