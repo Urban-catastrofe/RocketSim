@@ -96,11 +96,6 @@ impl ComparisonSet {
     pub fn map(&self) -> &HashMap<String, Comparison> {
         &self.map
     }
-
-    pub fn calc_norm_error(&self) -> f32 {
-        let square_sum: f32 = self.map.values().map(|v| v.rel_error().powi(2)).sum();
-        square_sum.sqrt()
-    }
 }
 
 fn compare_phys(phys_state: &PhysState, phys_record: &PhysRecord, comparisons: &mut ComparisonSet) {

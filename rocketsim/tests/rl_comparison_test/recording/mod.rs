@@ -89,6 +89,17 @@ impl Recording {
         }
 
         let stride = Self::detect_stride(&ticks);
+        if stride != 1 {
+            return Err(std::io::Error::new(
+                ErrorKind::InvalidData,
+                format!(
+                    "recording '{name}' detected at ~{}Hz (stride={stride}); \
+                     only 120Hz recordings are reliable enough to sample for \
+                     rocketsim tests. Re-record at 120Hz.",
+                    120 * stride
+                ),
+            ));
+        }
         Ok(Self {
             name: name.to_string(),
             info,

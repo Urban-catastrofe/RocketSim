@@ -1,68 +1,172 @@
 # How to Run RL Comparison Tests
 
+The harness replays recorded Rocket League ground-truth (`.rlpr`) through the
+sim and measures **per-tick physics divergence**. It is built to be driven by a
+human or an LLM chasing accuracy: survey the numbers, find the worst offender,
+deep-dive it, fix the sim, watch the number drop.
+
+> ⚠️ The current recordings were captured at 240 Hz and are being re-recorded
+> at 120 Hz. The harness **auto-detects the tick rate and hard-rejects**
+> anything that is not 120 Hz (stride ≠ 1) with an error, because a 240 Hz
+> source is too unreliable to sample for rocketsim tests. Until the set is
+> re-recorded, every case fails with that message.
+
 ## Quick Start
 
 ```bash
 # From external/rocketsim-v3-rust
-# Run all tests (each test prints per-tick + continuous stats):
-cargo test -p rocketsim -- --show-output --color never --test-threads=1
 
-# Run by category:
-cargo test -p rocketsim -- jump -- --show-output --color never
-cargo test -p rocketsim -- drive -- --show-output --color never
-cargo test -p rocketsim -- air -- --show-output --color never
-```
+# SURVEY: measure everything, never fail, no deep dives. Start here.
+RLGATE=off cargo test -p rocketsim -- --nocapture --test-threads=1
 
-## Run a Single Recording
+# GATE: enforce the physics budgets (fails on divergence). Per-case deep dive.
+cargo test -p rocketsim -- --nocapture --test-threads=1
 
-```bash
-# By exact name (snake_case of the .rlpr filename)
-cargo test -p rocketsim -- case_jump -- --show-output --color never
+# One case by name (snake_case of the .rlpr filename):
+cargo test -p rocketsim case_drive_5 -- --nocapture --test-threads=1
 
 # Pattern match:
-cargo test -p rocketsim -- drive_5 -- --show-output --color never
+cargo test -p rocketsim jump -- --nocapture --test-threads=1
 ```
 
-## Understanding Results
+`--test-threads=1` is required (the sim init is global). `--nocapture` shows
+the report lines.
 
-Each `.rlpr` file in `test_recordings/` generates a test case automatically
-(build.rs scans the directory at compile time). Each test runs **two modes**
-and prints a STAT line:
+## The Two Channels
 
-### Per-tick mode (state restored every tick)
-1. Restores arena state from the recording's tick N
-2. Sets controls from tick N+1
-3. Steps the physics by one tick
-4. Compares the result to the recording's tick N+1
+**Physics channel (gated).** Per tick we compare sim vs recording for each
+entity (every car + the ball) and each field: `pos`, `vel`, `ang_vel`,
+`rot_fwd`, `rot_up`. `pos` and `vel` are **hard-gated**: the test fails if
+their percentile exceeds the budget. The others are **soft** (reported only).
 
-This mode isolates single-tick physics accuracy. The STAT line shows:
-- `max=X@t=Y` — worst norm_error and the tick where it occurred
-- `avg` — average norm_error across all ticks
-- `v` — maximum raw velocity delta (UU/s) between sim and RL
-- `p` — maximum raw position delta (UU)
+**State channel (reported, never gated).** Discrete flags (`is_jumping`,
+`has_flipped`, …) are reported as a *mismatch rate*. These are state-machine
+*timing* bugs, a different fix from integration errors, so they don't fail the
+test.
 
-### Continuous mode (state set only at tick 0, then runs freely)
-The same as per-tick but state is never restored after tick 0 — errors compound.
-Capped runs at 120/240/480/960 ticks show how fast divergence grows.
+## Reading a Report Line
 
-A `norm_error` is the RMS of all per-field relative errors:
+```
+[drive_5] car_0 vel : p=15.06 max=58.4@t196 mean=6.5 rms=11.0 bias=2.4 over=100% budget=0.5 -> FAIL
+```
 
-| norm_error | Meaning |
+| token | meaning |
 |---|---|
-| **< 1.0** | **PASS** — within threshold |
-| **1.0–2.0** | Close — small physics differences |
-| **2.0–10.0** | Moderate — jump/landing divergence |
-| **> 10.0** | Significant — bug or missing feature |
+| `p` | the gated percentile (default p95) of the per-tick error magnitude |
+| `max@tN` | worst single-tick error and the tick index it happened at |
+| `mean` / `rms` | average magnitude / root-mean-square magnitude |
+| `bias` | magnitude of the **mean signed error vector** (a `bias_vec` line below gives direction). Non-zero bias = a wrong constant/formula; scatter with ~0 bias = integration precision |
+| `over` | % of ticks exceeding the budget |
+| `budget` | the tolerance for this field |
 
-### Per-tick error budget (post transpose fix, 2025-07)
+**Bias vs rms is the key diagnostic.** `bias ≈ rms` → systematic error, fix a
+constant or formula. `bias << rms` → scattered error, usually integration
+order/quantization, often acceptable.
 
-Most tests have per-tick max < 10. The remaining ~50–160 norm_error spikes come from:
-- **Jump activation velocity** (~50): RL's 2-tick impulse split (~108+184 UU/s)
-  can't be expressed as a single-tick impulse when state is restored every tick
-- **Airborne jump state timing** (~4): `is_jumping` persists while `controls.jump`
-  is held in the sim; RL ends it on liftoff
-- **Drive friction** (~4–115): small lateral velocity overestimation during
-  ground driving, most visible in long supersonic coasting scenarios
+## Env-Var Knobs
+
+| Env var | Meaning | Default |
+|---|---|---|
+| `RLGATE` | `strict` \| `off` — enforce physics budgets | `strict` |
+| `RLDEEP` | `fail` \| `always` \| `never` — when to emit a deep dive | `fail` |
+| `RLDEEP_RADIUS` | context ticks on *each side* of the deep-dive center | `15` |
+| `RLCAR` | focus one car index (`0`…), or `all` | `all` |
+| `RLTICK` | deep-dive a specific tick instead of the worst | worst |
+| `RLSEG` | `1` to print per-situation breakdowns | off |
+| `RLTHREADS` | worker threads for the per-tick pass | all cores (≤16) |
+| `RLCONT` | `1` to also run the sequential continuous (compounding) pass | off |
+| `RL_POS_TOL` / `RL_VEL_TOL` / `RL_ANGVEL_TOL` / `RL_ROT_TOL` | budget overrides | 0.1 / 0.5 / 0.5 / 0.02 |
+| `RL_PERCENTILE` | gate percentile (0..1) | 0.95 |
+
+## Deep Dive (failure mode)
+
+When a case fails (or `RLDEEP=always`), the harness re-drives a fresh arena
+over a window around the worst tick and prints, per tick: the physics deltas,
+the situation flags on **both** sides (`pred!real` when they disagree), and the
+controls applied — plus a field-by-field `pred vs real` snapshot at the center.
+
+```bash
+# Deep-dive the worst tick of car 2 in a 3v3 recording:
+RLDEEP=always RLCAR=2 cargo test -p rocketsim case_drive -- --nocapture --test-threads=1
+
+# Deep-dive a specific tick you spotted in the report:
+RLDEEP=always RLTICK=534 cargo test -p rocketsim case_jump_1 -- --nocapture --test-threads=1
+```
+
+The case name is the "UUID": `case_<name>` maps 1:1 to `<name>.rlpr`.
+
+This is how you localize a bug. Example from a jump recording: airborne ticks
+show `vel_e≈0.007` (perfect), then at the landing tick `ground` flips 0→1 and
+`vel_e` jumps to 142 — the snapshot shows the Z-velocity mismatch, pointing
+straight at the landing/jump-impulse transition rather than general physics.
+
+## Per-Situation Breakdown
+
+`RLSEG=1` splits each field's error by the recording's own regime flags
+(`grounded`/`airborne`, `boosting`, `jumping`, `flipping`, `supersonic`). This
+localizes error to a subsystem: large `vel` error only while `grounded`+
+`boosting` ⇒ ground friction/boost; only while `airborne` ⇒ air control.
+
+```bash
+RLGATE=off RLSEG=1 cargo test -p rocketsim case_drive_5 -- --nocapture --test-threads=1
+```
+
+## Per-Car Testing
+
+By default every car (and the ball) is measured and gated. To isolate one car
+in a multi-car recording (e.g. something looks fishy on car 2 of a 3v3):
+
+```bash
+RLCAR=2 RLGATE=off cargo test -p rocketsim case_drive -- --nocapture --test-threads=1
+```
+
+## Performance / Long Replays / Parallelism
+
+The measurement hot path computes raw deltas directly (no per-tick hash maps),
+and the per-tick pass is **embarrassingly parallel**: because state is restored
+from ground truth every tick, ticks are independent, so the range is sharded
+across `RLTHREADS` workers, each owning its own arena, and the stats are merged.
+
+Measured for a 20-minute (144k tick) 3v3 replay, `cargo test` profile:
+
+| threads | time | |
+|---|---|---|
+| 1 | ~44 s | |
+| 8 | ~6.5 s | 6.8x |
+| 16 | ~5 s | 8.8x |
+
+Single-car replays are far cheaper (~75 MB to parse, ~1 s per pass). Memory is
+≈ file size (≈520 B/tick per car), so a 3v3 20-min recording is ≈380 MB.
+
+The continuous pass is sequential by nature (errors compound), so it is opt-in
+via `RLCONT=1` to keep the default fast path to one parallel pass.
+
+### Determinism
+
+- The **gate (percentile)** is bit-identical across thread counts and runs.
+- `RLTHREADS=1` is fully deterministic for every reported number.
+- Under multiple threads, *secondary* stats (mean/rms/max) carry a tiny amount
+  of variance: the bullet physics vehicle keeps stateful suspension/solver
+  state across `step_tick` that a state-restore does not reset, so a shard's
+  first ticks run on a "cold" arena. This does **not** affect the gate. For
+  bit-exact reproduction of a specific number, use `RLTHREADS=1`.
+- The deep dive always re-drives single-threaded, so it is deterministic.
+
+`examples/bench_long_replay.rs` reproduces this loop to benchmark any
+tick/car/thread combination:
+```bash
+cargo run -p rocketsim --profile test --example bench_long_replay -- --ticks 144000 --cars 6 --threads 16
+```
+
+## Workflow To Improve Accuracy
+
+1. `RLGATE=off cargo test ... --nocapture` — survey. Sort by `vel`/`pos` p95.
+2. Pick the worst case + field. Note `bias` vs `rms` and run `RLSEG=1` to find
+   the regime.
+3. `RLDEEP=always RLCAR=<i> cargo test case_<name>` — read the window + center
+   snapshot to find the physical cause.
+4. Fix the sim.
+5. Re-run; confirm that case's p95 dropped. Repeat until the gate is green.
 
 ## Recording Ground Truth (Windows + cross-compiled DLL)
 
@@ -106,6 +210,9 @@ Then rebuild and test:
 rm -rf target/debug/build/rocketsim-* && cargo test -p rocketsim
 ```
 
+Record at **120 Hz** to match the sim tick rate (the current 240 Hz set is
+being replaced).
+
 ## Dealing with Corrupted Recordings
 
 Old recordings (pre-v4 logger) may have:
@@ -120,12 +227,21 @@ Old recordings (pre-v4 logger) may have:
 rocketsim/tests/
   mod.rs                          → entry point
   rl_comparison_test/
-    mod.rs                        → test runner + per-tick comparison
-    compare.rs                    → per-field comparison (pos, vel, rot, etc.)
+    mod.rs                        → thin orchestrator (run case, gate, dive)
+    config.rs                     → env-var knobs (RLDEEP, RLCAR, RLTICK, …)
+    tolerance.rs                  → per-field physics budgets
+    stats.rs                      → Field/Segment vocab + running/percentile stats
+    measure.rs                    → lean per-tick deltas (hot path, no alloc)
+    state.rs                      → state-machine mismatch-rate channel
+    report.rs                     → aggregation, gate eval, printing
+    deep_dive.rs                  → N-tick context-window dump
+    runner.rs                     → state restore + arena driving loop
+    compare.rs                    → rich pred-vs-real snapshot (deep dive)
     recording/
-      mod.rs                      → RLPR binary parser
+      mod.rs                      → RLPR binary parser + stride detection
       cpp_records.rs              → binary struct layouts + CarRecord→CarState
       data_reader.rs              → binary reader helpers
+      tick_record.rs              → per-tick record container
     test_recordings/*.rlpr        → ground truth recordings (auto-discovered)
     test_recordings_corrupt/      → old recordings with bad rotation data
 ```
@@ -150,11 +266,6 @@ rocketsim/tests/
 - **Wheel raycast clearing** — `Car::set_state` now calls
   `reset_wheel_suspension()` on all wheels to prevent stale contact normals
   from being used for friction computation after state restore.
-- **Test harness improvements**:
-  - `wheels_with_contact` derived from recording's `is_on_ground`
-  - `jump_time` convention conversion (RL's 0 → sim's MIN_TIME)
-  - `air_time_since_jump` closed to prevent false flip activations
-  - Added continuous mode with capped runs (120/240/480/960 ticks)
 
 ### 2024 — Original v4 changes
 - **Jump impulse moved to activation tick** — no longer delayed by 1 tick after

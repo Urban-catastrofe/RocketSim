@@ -27,7 +27,7 @@ fn generate_comparison_tests() {
                 }).collect();
 
                 test_code.push_str(&format!(
-                    "#[test] fn case_{}() {{ run_comparison_test(\"{}\", include_bytes!(r\"{}\")); }}",
+                    "#[allow(non_snake_case)] #[test] fn case_{}() {{ run_comparison_test(\"{}\", include_bytes!(r\"{}\")); }}",
                     test_name, test_name, path.display()
                 ));
             }
