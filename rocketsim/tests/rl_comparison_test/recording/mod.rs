@@ -12,7 +12,8 @@ use cpp_records::*;
 use data_reader::DataReader;
 
 const RLPR_MAGIC_BYTES: [u8; 4] = [82, 76, 80, 82];
-const RLPR_VERSION: u32 = 2;
+const RLPR_VERSION: u32 = 3;
+const RLPR_MIN_COMPAT_VERSION: u32 = 2;
 const RLPR_MAX_CARS: usize = 8;
 
 #[allow(dead_code)]
@@ -46,7 +47,7 @@ impl Recording {
         }
 
         let version = reader.read_u32()?;
-        if version != RLPR_VERSION {
+        if !(RLPR_MIN_COMPAT_VERSION..=RLPR_VERSION).contains(&version) {
             return Err(std::io::Error::new(
                 ErrorKind::InvalidData,
                 format!("RLPR version mismatch (expected: {RLPR_VERSION}, got: {version})"),
@@ -68,7 +69,12 @@ impl Recording {
         for _ in 0..num_ticks {
             let mut car_records = Vec::with_capacity(num_cars);
             for _ in 0..num_cars {
-                let car_record = unsafe { reader.read_struct_unsafe::<CarRecord>() }?;
+                let car_record = if version >= 3 {
+                    unsafe { reader.read_struct_unsafe::<CarRecord>()? }
+                } else {
+                    let v2: CarRecordV2 = unsafe { reader.read_struct_unsafe()? };
+                    v2.into()
+                };
                 car_records.push(car_record);
             }
             let ball_record = unsafe { reader.read_struct_unsafe::<PhysRecord>() }?;
@@ -150,5 +156,158 @@ impl Recording {
         let stride = median.round() as usize;
 
         stride.clamp(1, 8)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The C++ writer (RlprWriter.h) asserts these exact sizes; a mismatch here
+    /// means the binary layout drifted between the two ends and every recording
+    /// would parse garbage. Verified by `static_assert` in RlprWriter.h.
+    #[test]
+    fn layout_matches_cpp_writer() {
+        assert_eq!(size_of::<VecRecord>(), 12);
+        assert_eq!(size_of::<Mat3Record>(), 36);
+        assert_eq!(size_of::<PhysRecord>(), 104);
+        assert_eq!(size_of::<ControlsRecord>(), 24);
+        assert_eq!(size_of::<WheelRecord>(), 56);
+        assert_eq!(size_of::<HitRecord>(), 60);
+        assert_eq!(size_of::<CarRecord>(), 468);
+        assert_eq!(size_of::<CarRecordV2>(), 408);
+        assert_eq!(size_of::<RecordingInfo>(), 28);
+    }
+
+    /// Round-trip: hand-build a v3 RLPR (one tick, one car with a hit record)
+    /// and confirm the parser recovers the hit fields.
+    #[test]
+    fn parses_v3_hit_record() {
+        let mut bytes: Vec<u8> = Vec::new();
+        let mut push = |b: &[u8]| bytes.extend_from_slice(b);
+
+        push(&RLPR_MAGIC_BYTES);
+        push(&[0]); // little-endian
+        push(&RLPR_VERSION.to_le_bytes());
+        push(&(size_of::<RecordingInfo>() as u32).to_le_bytes());
+        let info = RecordingInfo {
+            num_cars: 1,
+            hitbox_rel_min_bt: VecRecord::new(0., 0., 0.),
+            hitbox_rel_max_bt: VecRecord::new(0., 0., 0.),
+        };
+        let info_bytes: [u8; 28] = unsafe { std::mem::transmute(info) };
+        push(&info_bytes);
+        push(&1u32.to_le_bytes()); // num_ticks
+
+        // Car record (v3, with hit)
+        let mut car = CarRecord {
+            phys: PhysRecord {
+                physics_frame: 1,
+                pos: VecRecord::new(100., 0., 20.),
+                rot: Mat3Record {
+                    rows: [
+                        VecRecord::new(1., 0., 0.),
+                        VecRecord::new(0., 1., 0.),
+                        VecRecord::new(0., 0., 1.),
+                    ],
+                },
+                lin_vel: VecRecord::new(500., 0., 0.),
+                ang_vel: VecRecord::new(0., 0., 0.),
+                has_world_contact: true,
+                world_contact_point: VecRecord::new(0., 0., 0.),
+                world_contact_normal: VecRecord::new(0., 0., 1.),
+            },
+            is_on_ground: true,
+            is_jumping: false,
+            is_flipping: false,
+            jump_time: 0.,
+            flip_time: 0.,
+            has_jumped: false,
+            double_jumped_or_flipped: false,
+            has_flip: false,
+            flip_rel_torque: VecRecord::new(0., 0., 0.),
+            boost_amount: 100.,
+            is_touching_ball: true,
+            prev_controls: ControlsRecord {
+                throttle: 1.,
+                steer: 0.,
+                pitch: 0.,
+                yaw: 0.,
+                roll: 0.,
+                jump: false,
+                boost: false,
+                handbrake: false,
+            },
+            wheels: [WheelRecord {
+                susp_length: 0.,
+                susp_rel_vel: 0.,
+                has_contact: true,
+                contact_normal: VecRecord::new(0., 0., 1.),
+                steer_amount: 0.,
+                engine_force: 0.,
+                brake: 0.,
+                lat_friction: 0.,
+                long_friction: 0.,
+                extra_pushback: 0.,
+                spin_speed: 0.,
+                friction_curve_input: 0.,
+            }; 4],
+            is_boosting: false,
+            is_supersonic: false,
+            is_demoed: false,
+            handbrake_val: 0.,
+            demo_respawn_timer: 0.,
+            air_time: 0.,
+            air_time_since_jump: 0.,
+            hit: HitRecord {
+                has_hit: true,
+                _pad: [0; 3],
+                ball_vel_before: VecRecord::new(0., 0., 0.),
+                car_vel_before: VecRecord::new(500., 0., 0.),
+                hit_normal: VecRecord::new(1., 0., 0.),
+                hit_location: VecRecord::new(100., 0., 20.),
+                rel_vel_mag: 500.,
+                closing_speed: 500.,
+            },
+        };
+        // Fix the hit's _pad to be zeroed (transmute of struct with bool).
+        car.hit._pad = [0; 3];
+        let car_bytes: [u8; 468] = {
+            let mut b = [0u8; 468];
+            let raw: [u8; 468] = unsafe { std::mem::transmute(car) };
+            b.copy_from_slice(&raw);
+            b
+        };
+        push(&(size_of::<CarRecord>() as u32).to_le_bytes());
+        push(&car_bytes);
+
+        // Ball record
+        let ball = PhysRecord {
+            physics_frame: 1,
+            pos: VecRecord::new(100., 0., 20.),
+            rot: Mat3Record {
+                rows: [
+                    VecRecord::new(1., 0., 0.),
+                    VecRecord::new(0., 1., 0.),
+                    VecRecord::new(0., 0., 1.),
+                ],
+            },
+            lin_vel: VecRecord::new(300., 0., 0.),
+            ang_vel: VecRecord::new(0., 0., 0.),
+            has_world_contact: false,
+            world_contact_point: VecRecord::new(0., 0., 0.),
+            world_contact_normal: VecRecord::new(0., 0., 0.),
+        };
+        let ball_bytes: [u8; 104] = unsafe { std::mem::transmute(ball) };
+        push(&(size_of::<PhysRecord>() as u32).to_le_bytes());
+        push(&ball_bytes);
+
+        let rec = Recording::from_bytes("v3_test", &bytes).expect("v3 parse failed");
+        assert_eq!(rec.ticks.len(), 1);
+        let hit = &rec.ticks[0].car_records[0].hit;
+        assert!(hit.has_hit);
+        assert_eq!(hit.rel_vel_mag, 500.);
+        assert_eq!(hit.closing_speed, 500.);
+        assert_eq!(hit.hit_normal.x, 1.);
     }
 }

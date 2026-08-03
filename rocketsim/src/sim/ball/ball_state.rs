@@ -2,7 +2,7 @@ use std::ops::{Deref, DerefMut};
 
 use glam::{Mat3A, Vec3A};
 
-use crate::{PhysState, consts, consts::heatseeker};
+use crate::{PhysState, consts, consts::heatseeker, sim::ball_hit::BallHitState};
 
 #[derive(Clone, Copy, Debug)]
 pub struct HeatseekerInfo {
@@ -62,8 +62,8 @@ pub struct BallState {
     pub hs_info: HeatseekerInfo,
     pub ds_info: DropshotInfo,
 
-    /// Used for preventing repeated extra impulse updates
-    pub last_extra_hit_tick: Option<u64>,
+    /// Stateful cadence bookkeeping for the car-ball extra hit impulse.
+    pub ball_hit: BallHitState,
     pub tick_count_since_kickoff: u64,
 }
 
@@ -83,7 +83,7 @@ impl BallState {
         },
         hs_info: HeatseekerInfo::DEFAULT,
         ds_info: DropshotInfo::DEFAULT,
-        last_extra_hit_tick: None,
+        ball_hit: BallHitState::DEFAULT,
         tick_count_since_kickoff: 0,
     };
 }

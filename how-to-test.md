@@ -11,6 +11,58 @@ deep-dive it, fix the sim, watch the number drop.
 > source is too unreliable to sample for rocketsim tests. Until the set is
 > re-recorded, every case fails with that message.
 
+## Residual Analysis (RLRESID)
+
+The **residual-force decomposition** (`RLRESID=1|2`) splits each tick's error
+into the *game's* per-tick Δvel vs the *sim's*, binned by regime (ground/air,
+boost, wall) and by ball contact. A large mean residual in one bin = a wrong
+force/impulse for that subsystem. Trace mode (`RLRESID=2`) prints per-tick
+Δvel for the ball while it touches a car — the impulse *pattern* (every tick vs
+every other tick) is directly visible.
+
+```bash
+# Residual decomposition for one case:
+RLRESID=1 cargo test -p rocketsim case_car_ball_soft_touch -- --nocapture --test-threads=1
+
+# Per-tick ball Δv trace during contact:
+RLRESID=2 cargo test -p rocketsim case_car_ball_soft_touch -- --nocapture --test-threads=1
+```
+
+## Hit-Cadence Analysis (RLRESID=3) — v3 recordings only
+
+`RLRESID=3` resolves the **same-tick vs delayed impulse** question. It needs the
+v3 hit records (the game's `OnHitBall` events, which capture the ball velocity
+*before* the impulse). Comparing `ball_vel_before` against the tick-end ball
+velocity (same tick vs next tick) shows which tick carries the impulse — the
+ground truth the calibration loop needs.
+
+```bash
+RLRESID=3 cargo test -p rocketsim case_car_ball_soft_touch -- --nocapture --test-threads=1
+```
+
+> ⚠️ The current recordings are v2 (no hit records). Re-record with the v3
+> logger (`tools/bakkesmod_physics_logger`, `RlprWriter.h` now writes v3). The
+> parser is version-aware — v2 recordings still work.
+
+## The Car-Ball Impulse Subsystem
+
+The extra hit impulse lives in `rocketsim/src/sim/ball_hit/` as a pure,
+config-driven module:
+
+- `config.rs` — `BallHitConfig` (all tunables: z_scale, forward_scale, factor
+  curve, max_delta_vel) + `HitCadence` enum (`EveryTick` / `EveryOtherTick` /
+  `OncePerEpisode`). The default preserves legacy behavior exactly.
+- `impulse.rs` — `compute_impulse` (pure) + `can_fire` (cadence check).
+- `state.rs` — `BallHitState` (last impulse tick, last contact tick).
+
+The impulse is a *pure function of the config* and the hit geometry, so the
+residual tool can fit the constants: change one config value, re-run the 3v3
+recordings, watch the ball vel p95 move. Known issue: the extra impulse is
+currently **neutralized** — `on_hit` adds it to `accum_lin_vel` after the
+solver runs, and `step_tick`'s `clear_accum_forces()` wipes it before the next
+solver applies it. The C++ original applies it in `_FinishPhysicsTick`. Making
+it effective (and re-fitting the factor curve) is pending Phase 2 calibration.
+
 ## Quick Start
 
 ```bash

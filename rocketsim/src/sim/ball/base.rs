@@ -22,13 +22,15 @@ use crate::{
     },
     consts::{BT_TO_UU, UU_TO_BT, dropshot, heatseeker, snowday},
     get_neighbor_indices_1, get_neighbor_indices_2, get_tile_pos,
-    sim::{UserInfoTypes, consts},
+    sim::{UserInfoTypes, ball_hit::BallHitConfig, consts},
 };
 
 pub(crate) struct Ball {
     pub state: BallState,
     pub rigid_body_idx: usize,
     pub ground_stick_applied: bool,
+    /// Tunable car-ball extra-hit impulse parameters.
+    pub hit_config: BallHitConfig,
 }
 
 impl Ball {
@@ -108,6 +110,7 @@ impl Ball {
             state: BallState::DEFAULT,
             rigid_body_idx,
             ground_stick_applied: false,
+            hit_config: BallHitConfig::default(),
         }
     }
 
@@ -235,7 +238,7 @@ impl Ball {
         }
     }
 
-    pub(crate) fn finish_physics_tick(&mut self, rb: &mut RigidBody) {
+pub(crate) fn finish_physics_tick(&mut self, rb: &mut RigidBody) {
         self.state.phys.vel = rb.lin_vel * BT_TO_UU;
         self.state.phys.ang_vel = rb.ang_vel;
 
@@ -254,49 +257,32 @@ impl Ball {
         tick_count: u64,
         rb: &mut RigidBody,
     ) {
-        let car_forward = car.state.phys.rot_mat.x_axis;
-        let rel_pos = self.state.phys.pos - car.state.phys.pos;
-        let rel_vel = self.state.phys.vel - car.state.phys.vel;
+        // The ball is in contact with a car this tick — track it for the
+        // once-per-episode cadence.
+        self.state.ball_hit.last_contact_tick = Some(tick_count);
 
-        let rel_speed = rel_vel
-            .length()
-            .min(consts::ball::car_hit_impulse::MAX_DELTA_VEL_UU);
+        let ctx = crate::sim::ball_hit::HitContext {
+            ball_pos: self.state.phys.pos,
+            ball_vel: self.state.phys.vel,
+            car_pos: car.state.phys.pos,
+            car_vel: car.state.phys.vel,
+            car_forward: car.state.phys.rot_mat.x_axis,
+            game_mode,
+            car_is_on_ground: car.state.is_on_ground,
+            car_up_z: car.state.phys.rot_mat.z_axis.z,
+        };
 
-        // Prevent repeated extra impulses
-        let can_accel = self
-            .state
-            .last_extra_hit_tick
-            .is_none_or(|last_hit_tick| last_hit_tick + 1 < tick_count);
-
-        if rel_speed > 0.0 && can_accel {
-            let extra_z_scale = game_mode == GameMode::Hoops
-                && car.state.is_on_ground
-                && car.state.phys.rot_mat.z_axis.z
-                    > consts::ball::car_hit_impulse::Z_SCALE_HOOPS_NORMAL_Z_THRESH;
-            let z_scale = if extra_z_scale {
-                consts::ball::car_hit_impulse::Z_SCALE_HOOPS_GROUND
-            } else {
-                consts::ball::car_hit_impulse::Z_SCALE_NORMAL
-            };
-
-            let mut hit_dir = (rel_pos * Vec3A::new(1.0, 1.0, z_scale)).normalize_or_zero();
-            let forward_dir_adjustment = car_forward
-                * hit_dir.dot(car_forward)
-                * const { 1.0 - consts::ball::car_hit_impulse::FORWARD_SCALE };
-            hit_dir = (hit_dir - forward_dir_adjustment).normalize_or_zero();
-
-            let added_hit_impulse = hit_dir
-                * rel_speed
-                * consts::curves::BALL_CAR_EXTRA_IMPULSE_FACTOR.get_output(rel_speed)
-                * mutator_config.ball_hit_extra_force_scale;
-            rb.add_impulse(
-                None,
-                Impulse::Linear(added_hit_impulse * UU_TO_BT),
-                false,
-                true,
-            );
-
-            self.state.last_extra_hit_tick = Some(tick_count);
+        if crate::sim::ball_hit::can_fire(&self.state.ball_hit, &self.hit_config, tick_count) {
+            let impulse = crate::sim::ball_hit::compute_impulse(&ctx, &self.hit_config);
+            if impulse != Vec3A::ZERO {
+                rb.add_impulse(
+                    None,
+                    Impulse::Linear(impulse * mutator_config.ball_hit_extra_force_scale * UU_TO_BT),
+                    false,
+                    true,
+                );
+                self.state.ball_hit.last_impulse_tick = Some(tick_count);
+            }
         }
 
         match game_mode {

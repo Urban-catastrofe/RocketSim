@@ -1,5 +1,6 @@
 mod arena;
 mod ball;
+mod ball_hit;
 mod boost_pad;
 mod car;
 pub mod collision_mesh_file;

@@ -176,6 +176,38 @@ impl From<PhysRecord> for PhysState {
     }
 }
 
+/// v3: the game's `OnHitBall` event for one tick (zero when the car did not
+/// hit the ball this tick). `ball_vel_before`/`car_vel_before` are the
+/// velocities at the hit event — i.e. BEFORE the impulse — so comparing them
+/// against the tick-end velocity in [`PhysRecord`] isolates the impulse timing.
+#[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct HitRecord {
+    pub has_hit: bool,
+    pub _pad: [u8; 3],
+    pub ball_vel_before: VecRecord,
+    pub car_vel_before: VecRecord,
+    pub hit_normal: VecRecord,
+    pub hit_location: VecRecord,
+    pub rel_vel_mag: f32,
+    pub closing_speed: f32,
+}
+
+impl Default for HitRecord {
+    fn default() -> Self {
+        Self {
+            has_hit: false,
+            _pad: [0; 3],
+            ball_vel_before: VecRecord::new(0., 0., 0.),
+            car_vel_before: VecRecord::new(0., 0., 0.),
+            hit_normal: VecRecord::new(0., 0., 0.),
+            hit_location: VecRecord::new(0., 0., 0.),
+            rel_vel_mag: 0.,
+            closing_speed: 0.,
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct CarRecord {
@@ -208,6 +240,95 @@ pub struct CarRecord {
     pub demo_respawn_timer: f32,
     pub air_time: f32,
     pub air_time_since_jump: f32,
+
+    // ── v3 field (zero in v2 recordings) ──
+    pub hit: HitRecord,
+}
+
+/// The v2 car-record layout (identical to [`CarRecord`] minus the trailing
+/// [`HitRecord`]). Used to parse v2 recordings after the v3 format bump.
+#[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct CarRecordV2 {
+    pub phys: PhysRecord,
+
+    pub is_on_ground: bool,
+    pub is_jumping: bool,
+    pub is_flipping: bool,
+    pub jump_time: f32,
+    pub flip_time: f32,
+    pub has_jumped: bool,
+    pub double_jumped_or_flipped: bool,
+    pub has_flip: bool,
+    pub flip_rel_torque: VecRecord,
+
+    pub boost_amount: f32,
+
+    pub is_touching_ball: bool,
+
+    pub prev_controls: ControlsRecord,
+
+    pub wheels: [WheelRecord; 4],
+
+    pub is_boosting: bool,
+    pub is_supersonic: bool,
+    pub is_demoed: bool,
+    pub handbrake_val: f32,
+    pub demo_respawn_timer: f32,
+    pub air_time: f32,
+    pub air_time_since_jump: f32,
+}
+
+impl From<CarRecordV2> for CarRecord {
+    fn from(v2: CarRecordV2) -> Self {
+        let CarRecordV2 {
+            phys,
+            is_on_ground,
+            is_jumping,
+            is_flipping,
+            jump_time,
+            flip_time,
+            has_jumped,
+            double_jumped_or_flipped,
+            has_flip,
+            flip_rel_torque,
+            boost_amount,
+            is_touching_ball,
+            prev_controls,
+            wheels,
+            is_boosting,
+            is_supersonic,
+            is_demoed,
+            handbrake_val,
+            demo_respawn_timer,
+            air_time,
+            air_time_since_jump,
+        } = v2;
+        Self {
+            phys,
+            is_on_ground,
+            is_jumping,
+            is_flipping,
+            jump_time,
+            flip_time,
+            has_jumped,
+            double_jumped_or_flipped,
+            has_flip,
+            flip_rel_torque,
+            boost_amount,
+            is_touching_ball,
+            prev_controls,
+            wheels,
+            is_boosting,
+            is_supersonic,
+            is_demoed,
+            handbrake_val,
+            demo_respawn_timer,
+            air_time,
+            air_time_since_jump,
+            hit: HitRecord::default(),
+        }
+    }
 }
 impl From<CarRecord> for CarState {
     fn from(phys_record: CarRecord) -> Self {

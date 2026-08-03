@@ -19,6 +19,7 @@ mod diagnose;
 mod measure;
 mod recording;
 mod report;
+mod residual;
 mod runner;
 mod state;
 mod stats;
@@ -31,6 +32,33 @@ fn test_recording(recording: &Recording) {
     if std::env::var("RLDIAG").is_ok() {
         diagnose::dump_events(recording);
         return;
+    }
+
+    // RLRESID=1|2: residual-force decomposition (see residual.rs).
+    if let Ok(v) = std::env::var("RLRESID") {
+        match v.as_str() {
+            "1" | "2" => {
+                residual::analyze(recording);
+                return;
+            }
+            "3" => {
+                residual::analyze_cadence(recording);
+                return;
+            }
+            "4" | "5" | "6" => {
+                residual::analyze_impulse(recording);
+                return;
+            }
+            "7" => {
+                residual::analyze_impulse_gap(recording);
+                return;
+            }
+            "8" => {
+                residual::analyze_car_z(recording);
+                return;
+            }
+            _ => {}
+        }
     }
 
     let cfg = HarnessConfig::from_env();

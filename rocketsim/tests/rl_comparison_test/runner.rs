@@ -109,14 +109,6 @@ pub fn set_state_to_record_tick(
         cs.air_time = rep_cs.air_time;
         cs.air_time_since_jump = rep_cs.air_time_since_jump;
 
-        // RL stores jump_time=0 on the activation tick; the sim uses
-        // jump_time=TICK_TIME to skip Phase A's immediate-force branch.
-        // Use MIN_TIME so Phase B can end the jump immediately if conditions
-        // are met (matching RL's ability to end jumps within 1 tick).
-        if cs.is_jumping && cs.jump_time == 0.0 {
-            cs.jump_time = rocketsim::consts::car::jump::MIN_TIME;
-        }
-
         // The observer tracks is_flipping until landing; the sim ends it
         // after TORQUE_TIME. If the recording has is_flipping=true with
         // flip_time=0 (free-flight frame), push it past TORQUE_TIME so
