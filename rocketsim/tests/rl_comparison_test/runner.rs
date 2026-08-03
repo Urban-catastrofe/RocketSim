@@ -32,6 +32,10 @@ fn is_ball_sentinel(phys: &PhysRecord) -> bool {
 /// reproduce. Such ticks are voided from measurement.
 const MAX_PHYS_DISPLACEMENT: f32 = 100.0;
 
+/// Restore+step cycles to run on a fresh shard arena before measuring, so the
+/// Bullet contact manifolds settle (a cold arena's first steps diverge).
+const SHARD_WARMUP_TICKS: usize = 2;
+
 /// True if the recording's `i -> i + stride` transition is non-physical (any
 /// car or the ball jumps farther than [`MAX_PHYS_DISPLACEMENT`]).
 fn has_discontinuity(recording: &Recording, i: usize, stride: usize) -> bool {
@@ -190,6 +194,11 @@ fn run_per_tick_shard(recording: &Recording, shard: &[usize]) -> Report {
     let mut report = Report::new(recording.name.clone(), stride, num_cars, shard.len());
     let mut controls_buf: Vec<CarControls> = vec![CarControls::DEFAULT; num_cars];
 
+    // The first step or two on a fresh (cold) arena diverge before the Bullet
+    // contact manifolds settle, so run a few restore+step cycles without
+    // measuring them to warm the arena up.
+    let mut warmup_left = SHARD_WARMUP_TICKS;
+
     for &i in shard {
         // Void non-physical recording discontinuities (goal resets, demos,
         // respawns, logger car-index swaps): a physics step cannot reproduce a
@@ -206,9 +215,19 @@ fn run_per_tick_shard(recording: &Recording, shard: &[usize]) -> Report {
         set_state_to_record_tick(&mut arena, &car_idcs, from_tick, &controls_buf);
         arena.step_tick();
 
+        if warmup_left > 0 {
+            warmup_left -= 1;
+            continue;
+        }
+
         for (j, &car_idx) in car_idcs.iter().enumerate() {
-            let cs: CarState = *arena.get_car_state(car_idx);
             let real = &to_tick.car_records[j];
+            // A demoed car is parked/absent (the logger parks it at origin);
+            // measuring it against the sim fabricates divergence.
+            if real.is_demoed {
+                continue;
+            }
+            let cs: CarState = *arena.get_car_state(car_idx);
             let from_car = &from_tick.car_records[j];
             let delta = compute_delta(&cs.phys, &real.phys);
 
