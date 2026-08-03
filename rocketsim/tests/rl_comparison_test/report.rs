@@ -92,6 +92,9 @@ pub struct Report {
     pub name: String,
     pub stride: usize,
     pub ticks_measured: u64,
+    /// Ticks skipped because the recording has a non-physical discontinuity
+    /// (goal reset, demo, logger car-index swap).
+    pub ticks_voided: u64,
     pub num_cars: usize,
     /// Cars first (0..num_cars), then the ball at index num_cars.
     pub entities: Vec<EntityReport>,
@@ -108,6 +111,7 @@ impl Report {
             name,
             stride,
             ticks_measured: 0,
+            ticks_voided: 0,
             num_cars,
             entities,
         }
@@ -132,6 +136,7 @@ impl Report {
     /// Combine another report into this one (parallel shard merge).
     pub fn merge(&mut self, other: Report) {
         self.ticks_measured += other.ticks_measured;
+        self.ticks_voided += other.ticks_voided;
         for (mine, theirs) in self.entities.iter_mut().zip(other.entities.into_iter()) {
             mine.merge(theirs);
         }

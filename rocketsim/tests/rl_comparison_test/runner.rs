@@ -12,9 +12,50 @@ use rocketsim::{Arena, BallState, CarBodyConfig, CarControls, CarState, GameMode
 use super::config::HarnessConfig;
 use super::measure::compute_delta;
 use super::recording::Recording;
+use super::recording::cpp_records::PhysRecord;
 use super::recording::tick_record::TickRecord;
 use super::report::Report;
 use super::stats::Field;
+
+/// The logger parks the ball at a sentinel position far below the arena when it
+/// is not part of a (car-focused) scenario. A real ball is always inside the
+/// arena (z >= ~ball radius), so a deeply-negative z marks an absent ball —
+/// comparing against it would fabricate a huge divergence.
+fn is_ball_sentinel(phys: &PhysRecord) -> bool {
+    phys.pos.z < -1000.0
+}
+
+/// Max displacement any entity can physically travel in one recorded step.
+/// Cars top out near 2300 UU/s (~19 UU/tick at 120 Hz) and the ball near
+/// ~50 UU/tick, so anything beyond this is a game-state discontinuity — a goal
+/// reset, demo/respawn, or a logger car-index swap — not physics the sim can
+/// reproduce. Such ticks are voided from measurement.
+const MAX_PHYS_DISPLACEMENT: f32 = 100.0;
+
+/// True if the recording's `i -> i + stride` transition is non-physical (any
+/// car or the ball jumps farther than [`MAX_PHYS_DISPLACEMENT`]).
+fn has_discontinuity(recording: &Recording, i: usize, stride: usize) -> bool {
+    let from = &recording.ticks[i];
+    let to = &recording.ticks[i + stride];
+
+    for (fc, tc) in from.car_records.iter().zip(&to.car_records) {
+        let a: glam::Vec3A = fc.phys.pos.into();
+        let b: glam::Vec3A = tc.phys.pos.into();
+        if (b - a).length() > MAX_PHYS_DISPLACEMENT {
+            return true;
+        }
+    }
+
+    if !is_ball_sentinel(&to.ball_record) {
+        let a: glam::Vec3A = from.ball_record.pos.into();
+        let b: glam::Vec3A = to.ball_record.pos.into();
+        if (b - a).length() > MAX_PHYS_DISPLACEMENT {
+            return true;
+        }
+    }
+
+    false
+}
 
 pub fn make_arena(num_cars: usize) -> (Arena, Vec<usize>) {
     let mut arena = Arena::new(GameMode::Soccar);
@@ -150,6 +191,14 @@ fn run_per_tick_shard(recording: &Recording, shard: &[usize]) -> Report {
     let mut controls_buf: Vec<CarControls> = vec![CarControls::DEFAULT; num_cars];
 
     for &i in shard {
+        // Void non-physical recording discontinuities (goal resets, demos,
+        // respawns, logger car-index swaps): a physics step cannot reproduce a
+        // teleport, so measuring it would fabricate divergence.
+        if has_discontinuity(recording, i, stride) {
+            report.ticks_voided += 1;
+            continue;
+        }
+
         let from_tick = &recording.ticks[i];
         let to_tick = &recording.ticks[i + stride];
         controls_for(to_tick, &mut controls_buf);
@@ -171,12 +220,16 @@ fn run_per_tick_shard(recording: &Recording, shard: &[usize]) -> Report {
             ent.state.record(&cs, real);
         }
 
-        let ball_state: &BallState = arena.get_ball_state();
-        let ball_delta = compute_delta(&ball_state.phys, &to_tick.ball_record);
-        let ball_ent = &mut report.entities[report.num_cars];
-        for field in Field::ALL {
-            let s = *ball_delta.get(field);
-            ball_ent.field_mut(field).add(s.mag, s.signed, i, None);
+        // Skip the ball when it is parked at the "absent" sentinel; comparing
+        // against it would fabricate divergence (see is_ball_sentinel).
+        if !is_ball_sentinel(&to_tick.ball_record) {
+            let ball_state: &BallState = arena.get_ball_state();
+            let ball_delta = compute_delta(&ball_state.phys, &to_tick.ball_record);
+            let ball_ent = &mut report.entities[report.num_cars];
+            for field in Field::ALL {
+                let s = *ball_delta.get(field);
+                ball_ent.field_mut(field).add(s.mag, s.signed, i, None);
+            }
         }
 
         report.ticks_measured += 1;

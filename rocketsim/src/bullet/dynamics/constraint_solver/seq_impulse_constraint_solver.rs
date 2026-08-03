@@ -373,7 +373,13 @@ impl SeqImpulseConstraintSolver {
     }
 
     fn solve_group_split_impulse_iterations(&mut self) {
-        let mut should_run = (1u64 << self.tmp_solver_contact_constraint_pool.len()) - 1;
+        let n = self.tmp_solver_contact_constraint_pool.len();
+        // One convergence bit per contact, saturating at 128 bits (the old u64
+        // mask panicked at >=64 contacts, e.g. 3v3 pile-ups). A group with more
+        // than 128 contacts — unrealistic in Rocketsim — disables the mask and
+        // simply runs every contact on every iteration (correct, no early-exit).
+        let masked = n <= 128;
+        let mut should_run = if n >= 128 { u128::MAX } else { (1u128 << n) - 1 };
 
         for _ in 0..contact_solver_info::NUM_ITERATIONS {
             for (i, contact) in self
@@ -381,8 +387,8 @@ impl SeqImpulseConstraintSolver {
                 .iter_mut()
                 .enumerate()
             {
-                let mask = 1 << i;
-                if should_run & mask == 0 {
+                // `masked` short-circuits so the shift never reaches 128.
+                if masked && should_run & (1u128 << i) == 0 {
                     continue;
                 }
 
@@ -395,12 +401,12 @@ impl SeqImpulseConstraintSolver {
                 };
 
                 let residual = contact.resolve_split_penetration_impulse(body_a, body_b);
-                if residual * residual == 0.0 {
-                    should_run ^= mask;
+                if masked && residual * residual == 0.0 {
+                    should_run ^= 1u128 << i;
                 }
             }
 
-            if should_run == 0 {
+            if masked && should_run == 0 {
                 break;
             }
         }

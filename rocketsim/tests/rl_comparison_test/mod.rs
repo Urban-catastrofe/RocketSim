@@ -11,9 +11,11 @@
 
 use crate::rl_comparison_test::recording::Recording;
 
+mod car_order;
 mod compare;
 mod config;
 mod deep_dive;
+mod diagnose;
 mod measure;
 mod recording;
 mod report;
@@ -25,6 +27,12 @@ mod tolerance;
 use config::{DeepDiveMode, GateMode, HarnessConfig};
 
 fn test_recording(recording: &Recording) {
+    // RLDIAG=1: dump recording events (teleports/demos) instead of measuring.
+    if std::env::var("RLDIAG").is_ok() {
+        diagnose::dump_events(recording);
+        return;
+    }
+
     let cfg = HarnessConfig::from_env();
     let num_cars = recording.info.num_cars as usize;
 
@@ -95,7 +103,10 @@ fn run_comparison_test(name: &str, recording_bytes: &[u8]) {
     if !rocketsim::is_initialized() {
         rocketsim::init_from_default(true).unwrap();
     }
-    let recording = Recording::from_bytes(name, recording_bytes).unwrap();
+    let mut recording = Recording::from_bytes(name, recording_bytes).unwrap();
+    // Stabilize car identity (logger array order is unreliable); makes
+    // index-based restore/compare valid. No-op for 0/1-car recordings.
+    car_order::reorder_cars(&mut recording);
     test_recording(&recording);
 }
 
