@@ -26,40 +26,25 @@ fn main() {
     controls.throttle = 1.0;
     arena.set_car_controls(idx, controls);
 
-    println!("=== throttle 1.0 ===");
-    println!("tick | z_pos | z_vel | z_vel_delta | on_ground");
-    let mut prev_z = 0.0f32;
-    for t in 0..240 {
+    // Drive for 5 seconds, report max speed + final speed.
+    let mut max_speed = 0.0f32;
+    for t in 0..600 {
         arena.step_tick();
         let s = *arena.get_car_state(idx);
-        let dz = s.phys.vel.z - prev_z;
-        if t % 6 == 0 {
-            println!(
-                "{t:>4} | {:>7.3} | {:>7.3} | {:>7.3} | {}",
-                s.phys.pos.z, s.phys.vel.z, dz, s.is_on_ground
-            );
-        }
-        prev_z = s.phys.vel.z;
+        max_speed = max_speed.max(s.phys.vel.length());
     }
+    let s = *arena.get_car_state(idx);
+    println!("=== throttle 1.0, 5s ===");
+    println!("max_speed={max_speed:.1}  final_speed={:.1}  final_pos_z={:.3}  boost={:.1}", s.phys.vel.length(), s.phys.pos.z, s.boost);
 
-    // Now coast (no throttle) from a rolling state.
-    controls.throttle = 0.0;
+    println!("=== throttle 1.0 + boost, 5s ===");
+    controls.boost = true;
     arena.set_car_controls(idx, controls);
-    let mut cs = *arena.get_car_state(idx);
-    cs.phys.vel = glam::Vec3A::new(1000.0, 0.0, 0.0);
-    arena.set_car_state(idx, cs);
-    println!("=== coast @1000 uu/s ===");
-    let mut prev_z = 0.0f32;
-    for t in 240..480 {
+    let mut max_speed = 0.0f32;
+    for _ in 0..600 {
         arena.step_tick();
         let s = *arena.get_car_state(idx);
-        let dz = s.phys.vel.z - prev_z;
-        if t % 6 == 0 {
-            println!(
-                "{t:>4} | {:>7.3} | {:>7.3} | {:>7.3} | {}",
-                s.phys.pos.z, s.phys.vel.z, dz, s.is_on_ground
-            );
-        }
-        prev_z = s.phys.vel.z;
+        max_speed = max_speed.max(s.phys.vel.length());
     }
+    println!("max_speed={max_speed:.1}  boost={:.1}", arena.get_car_state(idx).boost);
 }

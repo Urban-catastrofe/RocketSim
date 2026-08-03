@@ -291,6 +291,130 @@ pub fn analyze_cadence(recording: &Recording) {
     let _ = num_cars;
 }
 
+// ── boost acceleration audit (RLRESID=10) ─────────────────────────────────────
+//
+// Measures the game's vs sim's per-tick forward acceleration while boosting on
+// the ground, bucketed by speed. The sim's boost accel is a constant
+// (ACCEL_GROUND = 2975/3 ≈ 991.7 uu/s²); the game's may differ with speed.
+
+pub fn analyze_boost(recording: &Recording) {
+    let num_cars = recording.info.num_cars as usize;
+    let stride = recording.stride;
+    let (mut arena, car_idcs) = make_arena(num_cars);
+    let mut controls_buf: Vec<CarControls> = vec![CarControls::DEFAULT; num_cars];
+
+    // Buckets by starting speed: (game_fwd_accel, sim_fwd_accel, n)
+    let mut buckets: Vec<(f32, f32, u32)> = vec![(0., 0., 0); 8];
+
+    for i in (0..recording.ticks.len().saturating_sub(stride + 1)).step_by(stride) {
+        let from_tick = &recording.ticks[i];
+        let to_tick = &recording.ticks[i + stride];
+        for (j, car_record) in to_tick.car_records.iter().enumerate() {
+            controls_buf[j] = car_record.prev_controls.into();
+        }
+        set_state_to_record_tick(&mut arena, &car_idcs, from_tick, &controls_buf);
+        arena.step_tick();
+
+        for (j, &car_idx) in car_idcs.iter().enumerate() {
+            let to_car = &to_tick.car_records[j];
+            if to_car.is_demoed {
+                continue;
+            }
+            let prev = &to_car.prev_controls;
+            if !prev.boost || !to_car.is_on_ground {
+                continue;
+            }
+            let from_car = &from_tick.car_records[j];
+            let fwd = glam::Vec3A::from(to_car.phys.rot.rows[0]);
+            let game_dv = glam::Vec3A::from(to_car.phys.lin_vel) - glam::Vec3A::from(from_car.phys.lin_vel);
+            let game_fwd = game_dv.dot(fwd);
+            let sim_dv = arena.get_car_state(car_idx).phys.vel - glam::Vec3A::from(from_car.phys.lin_vel);
+            let sim_fwd = sim_dv.dot(fwd);
+            let speed = glam::Vec3A::from(from_car.phys.lin_vel).length();
+            let b = ((speed / 500.0) as usize).min(7);
+            let t = &mut buckets[b];
+            t.0 += game_fwd;
+            t.1 += sim_fwd;
+            t.2 += 1;
+        }
+    }
+
+    println!("[{}] BOOST AUDIT (grounded, per-tick fwd Δv): speed | game | sim | n", recording.name);
+    for (b, (g, s, n)) in buckets.iter().enumerate() {
+        if *n == 0 {
+            continue;
+        }
+        let nf = *n as f32;
+        println!(
+            "  [{:>4},{:>4})  game={:>+7.3}  sim={:>+7.3}  n={}",
+            b * 500,
+            (b + 1) * 500,
+            g / nf,
+            s / nf,
+            n
+        );
+    }
+}
+
+// ── car speed audit (RLRESID=9) ──────────────────────────────────────────────
+//
+// The sim's car caps at ~1410 uu/s with throttle (DRIVE_SPEED_TORQUE_FACTOR
+// drops to 0 at 1410), but the game's car reaches 2300. This breaks non-boost
+// driving at high speed. This audit reports the game's vs sim's speed on
+// throttling (non-boosting) ticks.
+
+pub fn analyze_car_speed(recording: &Recording) {
+    let num_cars = recording.info.num_cars as usize;
+    let stride = recording.stride;
+    let (mut arena, car_idcs) = make_arena(num_cars);
+    let mut controls_buf: Vec<CarControls> = vec![CarControls::DEFAULT; num_cars];
+
+    // Per-car: (game_speed, sim_speed, game_max_speed, sim_max_speed, n)
+    let mut acc = vec![(0.0f32, 0.0f32, 0.0f32, 0.0f32, 0u32); num_cars];
+
+    for i in (0..recording.ticks.len().saturating_sub(stride + 1)).step_by(stride) {
+        let from_tick = &recording.ticks[i];
+        let to_tick = &recording.ticks[i + stride];
+        for (j, car_record) in to_tick.car_records.iter().enumerate() {
+            controls_buf[j] = car_record.prev_controls.into();
+        }
+        set_state_to_record_tick(&mut arena, &car_idcs, from_tick, &controls_buf);
+        arena.step_tick();
+
+        for (j, &car_idx) in car_idcs.iter().enumerate() {
+            let to_car = &to_tick.car_records[j];
+            if to_car.is_demoed {
+                continue;
+            }
+            // Throttling, not boosting, not airborne: the pure-throttle regime.
+            let prev = &to_car.prev_controls;
+            if prev.throttle <= 0.0 || prev.boost || !to_car.is_on_ground {
+                continue;
+            }
+            let game_speed = glam::Vec3A::from(to_car.phys.lin_vel).length();
+            let sim_speed = arena.get_car_state(car_idx).phys.vel.length();
+            let a = &mut acc[j];
+            a.0 += game_speed;
+            a.1 += sim_speed;
+            a.2 = a.2.max(game_speed);
+            a.3 = a.3.max(sim_speed);
+            a.4 += 1;
+        }
+    }
+
+    println!("[{}] CAR SPEED AUDIT (throttle, no boost, grounded): car | game speed | sim speed | game max | sim max | n", recording.name);
+    for (j, (gs, ss, gmx, smx, n)) in acc.iter().enumerate() {
+        if *n == 0 {
+            continue;
+        }
+        let nf = *n as f32;
+        println!(
+            "  car{j} | {:>8.1} | {:>8.1} | {:>8.1} | {:>8.1} | n={}",
+            gs / nf, ss / nf, gmx, smx, n
+        );
+    }
+}
+
 // ── grounded car z-velocity audit (RLRESID=8) ────────────────────────────────
 //
 // The residual z-bias on grounded cars is the dominant compounding error. This
@@ -366,7 +490,7 @@ pub fn analyze_impulse(recording: &Recording) {
     let mut samples: Vec<(f32, f32, bool)> = Vec::new();
 
     for i in (0..recording.ticks.len().saturating_sub(stride + 1)).step_by(stride) {
-        for (j, car) in recording.ticks[i].car_records.iter().enumerate() {
+        for (_j, car) in recording.ticks[i].car_records.iter().enumerate() {
             if !car.hit.has_hit {
                 continue;
             }

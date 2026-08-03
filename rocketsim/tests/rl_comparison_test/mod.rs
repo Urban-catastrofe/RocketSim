@@ -57,6 +57,14 @@ fn test_recording(recording: &Recording) {
                 residual::analyze_car_z(recording);
                 return;
             }
+            "9" => {
+                residual::analyze_car_speed(recording);
+                return;
+            }
+            "10" => {
+                residual::analyze_boost(recording);
+                return;
+            }
             _ => {}
         }
     }
@@ -85,7 +93,7 @@ fn test_recording(recording: &Recording) {
         let (mut arena2, car_idcs2) = runner::make_arena(num_cars);
         let cont = runner::run_continuous(recording, &mut arena2, &car_idcs2, &cfg);
         println!(
-            "[{}] CONTINUOUS car{}: max_pos={:.2}@t{} max_vel={:.2}@t{} ticks={}",
+            "[{}] CONTINUOUS car{}: max_pos={:.2}@t{} max_vel={:.2}@t{} ticks={} | final_err=({:+.1},{:+.1},{:+.1})",
             recording.name,
             cfg.car_focus.unwrap_or(0),
             cont.max_pos,
@@ -93,6 +101,9 @@ fn test_recording(recording: &Recording) {
             cont.max_vel,
             cont.max_vel_tick,
             cont.ticks,
+            cont.final_pos_err.x,
+            cont.final_pos_err.y,
+            cont.final_pos_err.z,
         );
     }
 

@@ -298,6 +298,8 @@ pub struct ContinuousSummary {
     pub max_pos_tick: usize,
     pub max_vel: f32,
     pub max_vel_tick: usize,
+    /// Final position error broken into x/y/z (the compounding direction).
+    pub final_pos_err: glam::Vec3A,
 }
 
 /// Continuous mode: state set once at tick 0, then runs freely. Tracks the
@@ -342,6 +344,7 @@ pub fn run_continuous(
             summary.max_vel = vel_delta;
             summary.max_vel_tick = i;
         }
+        summary.final_pos_err = cs.phys.pos - glam::Vec3A::from(real.phys.pos);
         summary.ticks += 1;
     }
 
