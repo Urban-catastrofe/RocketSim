@@ -31,6 +31,12 @@ pub(crate) struct Ball {
     pub ground_stick_applied: bool,
     /// Tunable car-ball extra-hit impulse parameters.
     pub hit_config: BallHitConfig,
+    /// Extra car-ball hit impulse computed during contact that is applied at
+    /// the start of the *next* tick. RL applies the reactive contact impulse
+    /// on the contact tick and the extra "carry" impulse one tick later;
+    /// adding it to `accum_lin_vel` after the solver runs (as before) let
+    /// `clear_accum_forces()` wipe it before it could ever take effect.
+    pub(crate) pending_hit_impulse: Vec3A,
 }
 
 impl Ball {
@@ -111,6 +117,7 @@ impl Ball {
             rigid_body_idx,
             ground_stick_applied: false,
             hit_config: BallHitConfig::default(),
+            pending_hit_impulse: Vec3A::ZERO,
         }
     }
 
@@ -131,6 +138,10 @@ impl Ball {
             rb.set_activation_state(ActivationState::Active);
         }
 
+        // A pending hit impulse must not survive a state restore — the
+        // recording already contains the impulse in its own velocity.
+        self.pending_hit_impulse = Vec3A::ZERO;
+
         self.state = state;
     }
 
@@ -140,6 +151,14 @@ impl Ball {
         game_mode: GameMode,
         _mutator_config: &MutatorConfig, // TODO: Remove
     ) {
+        // Apply the extra hit impulse computed during the previous tick's
+        // contact, so it lands on the tick *after* the reactive impulse —
+        // matching RL's two-tick hit split.
+        if self.pending_hit_impulse != Vec3A::ZERO {
+            rb.lin_vel += self.pending_hit_impulse;
+            self.pending_hit_impulse = Vec3A::ZERO;
+        }
+
         match game_mode {
             GameMode::Heatseeker => {
                 if self.state.hs_info.y_target_dir == 0 {
@@ -255,7 +274,6 @@ pub(crate) fn finish_physics_tick(&mut self, rb: &mut RigidBody) {
         game_mode: GameMode,
         mutator_config: &MutatorConfig,
         tick_count: u64,
-        rb: &mut RigidBody,
     ) {
         // The ball is in contact with a car this tick — track it for the
         // once-per-episode cadence.
@@ -275,12 +293,10 @@ pub(crate) fn finish_physics_tick(&mut self, rb: &mut RigidBody) {
         if crate::sim::ball_hit::can_fire(&self.state.ball_hit, &self.hit_config, tick_count) {
             let impulse = crate::sim::ball_hit::compute_impulse(&ctx, &self.hit_config);
             if impulse != Vec3A::ZERO {
-                rb.add_impulse(
-                    None,
-                    Impulse::Linear(impulse * mutator_config.ball_hit_extra_force_scale * UU_TO_BT),
-                    false,
-                    true,
-                );
+                // Queue for the next tick instead of `accum_lin_vel` (which is
+                // wiped by `clear_accum_forces()` before it can ever apply).
+                self.pending_hit_impulse +=
+                    impulse * mutator_config.ball_hit_extra_force_scale * UU_TO_BT;
                 self.state.ball_hit.last_impulse_tick = Some(tick_count);
             }
         }

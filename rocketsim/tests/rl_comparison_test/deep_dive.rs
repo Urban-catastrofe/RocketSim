@@ -125,8 +125,15 @@ pub fn dump_window(recording: &Recording, cfg: &HarnessConfig, center: usize, en
         let ang_e = delta.get(Field::AngVel).mag;
 
         let from_car = &from_tick.car_records[focus_car];
+        let pred_pitch = cs.phys.rot_mat.x_axis.z.asin().to_degrees();
+        let real_rot = glam::Mat3A::from_cols(
+            real.phys.rot.rows[0].into(),
+            real.phys.rot.rows[1].into(),
+            real.phys.rot.rows[2].into(),
+        );
+        let real_pitch = real_rot.x_axis.z.asin().to_degrees();
         println!(
-            "[{}] DIVE {} t={:>6} ({:7.3}s) car{} pos_e={:8.3} vel_e={:8.3} ang_e={:7.3} | ground={} jump={} flip={} boost={} | {}",
+            "[{}] DIVE {} t={:>6} ({:7.3}s) car{} pos_e={:8.3} vel_e={:8.3} ang_e={:7.3} | pitch {:+5.1}deg/{:+5.1}deg vz {:+6.1}/{:+6.1} | ground={} jump={} flip={} boost={} | {}",
             recording.name,
             marker,
             i,
@@ -135,6 +142,10 @@ pub fn dump_window(recording: &Recording, cfg: &HarnessConfig, center: usize, en
             pos_e,
             vel_e,
             ang_e,
+            pred_pitch,
+            real_pitch,
+            cs.phys.vel.z,
+            real.phys.lin_vel.z,
             bool_pair(cs.is_on_ground, real.is_on_ground),
             bool_pair(cs.is_jumping, real.is_jumping),
             bool_pair(cs.is_flipping, real.is_flipping),

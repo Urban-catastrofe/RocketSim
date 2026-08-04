@@ -63,6 +63,10 @@ pub struct CarState {
     pub auto_flip_timer: f32,
     pub auto_flip_torque_scale: f32,
     pub bump_cooldown_timer: f32,
+    /// The car index this car last bumped. The cooldown only applies to that
+    /// specific other car (matching RL / RocketSim C++ `carContact.otherCarID`),
+    /// so a car can keep bumping different cars while one is cooling down.
+    pub bump_other_car_id: usize,
     /// If in contact with a static mesh/body, this is the collision normal of that contact on said body
     pub world_contact_normal: Option<Vec3A>,
     pub is_demoed: bool,
@@ -107,6 +111,7 @@ impl CarState {
         is_auto_flipping: false,
         world_contact_normal: None,
         bump_cooldown_timer: 0.0,
+        bump_other_car_id: usize::MAX,
         auto_flip_timer: 0.0,
         auto_flip_torque_scale: 0.0,
         is_demoed: false,

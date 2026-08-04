@@ -545,6 +545,9 @@ impl Arena {
             .step_simulation(TICK_TIME, &mut self.contact_tracker);
 
         let contact_count = self.contact_tracker.num_records();
+        // A single car-car collision can produce several manifold points; the
+        // bump impulse must fire once per pair per tick, not once per point.
+        let mut processed_car_car_pairs: Vec<(usize, usize)> = Vec::new();
         for idx in 0..contact_count {
             let contact = *self.contact_tracker.get_record(idx);
 
@@ -566,11 +569,15 @@ impl Arena {
                         );
                     }
                     UserInfoTypes::Car => {
-                        self.on_car_car_collision(
-                            user_pointer_a,
-                            user_pointer_b,
-                            &contact.manifold_point,
-                        );
+                        let (pa, pb) = (user_pointer_a.min(user_pointer_b), user_pointer_a.max(user_pointer_b));
+                        if !processed_car_car_pairs.contains(&(pa, pb)) {
+                            processed_car_car_pairs.push((pa, pb));
+                            self.on_car_car_collision(
+                                user_pointer_a,
+                                user_pointer_b,
+                                &contact.manifold_point,
+                            );
+                        }
                     }
                     _ => self.on_car_world_collision(user_pointer_a, &contact.manifold_point),
                 },
@@ -891,14 +898,12 @@ impl Arena {
         manifold_point: &ManifoldPoint,
         ball_is_body_a: bool,
     ) {
-        let ball_rb = &mut self.bullet_world.bodies_mut()[self.ball.rigid_body_idx];
-        let ball_accum_vel_before = ball_rb.accum_lin_vel;
+        let pending_before = self.ball.pending_hit_impulse;
         self.ball.on_hit(
             &self.cars[car_idx],
             self.config.game_mode,
             &self.config.mutators,
             self.tick_count,
-            ball_rb,
         );
 
         let contact_point = if ball_is_body_a {
@@ -907,7 +912,7 @@ impl Arena {
             manifold_point.pos_world_on_b
         } * BT_TO_UU;
 
-        let extra_hit_vel = (ball_rb.accum_lin_vel - ball_accum_vel_before) * BT_TO_UU;
+        let extra_hit_vel = (self.ball.pending_hit_impulse - pending_before) * BT_TO_UU;
         self.events.push(ArenaEvent::CarHitBall(CarHitBallEvent {
             car_idx,
             contact_point,
@@ -952,11 +957,14 @@ impl Arena {
                 mem::swap(&mut attacker_idx, &mut victim_idx);
             }
 
-            let attacker_state = &attacker.state;
-            let victim_state = &victim.state;
+            let (attacker_state, victim_state) = (&attacker.state, &victim.state);
 
-            if attacker_state.bump_cooldown_timer > 0.0 {
-                // In cooldown
+            // Per-other-car cooldown: after bumping `victim_idx`, the attacker
+            // can't bump THAT car again until the timer expires (but can bump
+            // others). Mirrors RL / RocketSim C++ `carContact`.
+            if attacker_state.bump_other_car_id == victim_idx
+                && attacker_state.bump_cooldown_timer > 0.0
+            {
                 continue;
             }
 
@@ -976,23 +984,52 @@ impl Arena {
                 continue;
             }
 
-            let local_point_x = if is_swapped {
-                manifold_point.local_point_b
-            } else {
-                manifold_point.local_point_a
+            // Attacker's local axes. RL hardcodes bAllowBackwardsDemolitions=1,
+            // so when the attacker is moving backward (forward-axis velocity
+            // negative) the "forward" used for the cone is flipped (and right,
+            // to keep handedness).
+            let rot = attacker_state.phys.rot_mat;
+            let (mut fwd, mut right, up) = (rot.x_axis, rot.y_axis, rot.z_axis);
+            if attacker_state.phys.vel.dot(fwd) < 0.0 {
+                fwd = -fwd;
+                right = -right;
             }
-            .x;
 
-            let hit_with_bumper = local_point_x * BT_TO_UU > consts::car::bump::MIN_FORWARD_DIST;
-            if !hit_with_bumper {
-                // Didn't hit with bumper
+            // Anything outside the (wider) bump cone is a non-event.
+            if !Self::inside_cone(
+                dir_to_victim,
+                fwd,
+                right,
+                up,
+                consts::car::bump::BUMP_CONE_YAW_RAD,
+                consts::car::bump::BUMP_CONE_PITCH_RAD,
+            ) {
                 continue;
             }
+
+            let in_demo_cone = Self::inside_cone(
+                dir_to_victim,
+                fwd,
+                right,
+                up,
+                consts::car::bump::DEMO_CONE_YAW_RAD,
+                consts::car::bump::DEMO_CONE_PITCH_RAD,
+            );
 
             let mut is_demo = match self.config.mutators.demo_mode {
                 DemoMode::OnContact => true,
                 DemoMode::Disabled => false,
-                DemoMode::Normal => attacker_state.is_supersonic,
+                DemoMode::Normal => {
+                    // RL gates the demo speed check on the attacker's
+                    // forward-axis speed (|v . fwd|, backwards demos allowed):
+                    // supersonic AND the forward-axis component must clear the
+                    // (SuperSonic.Speed - TurnoffSpeedBuffer) = 2100 floor,
+                    // AND the contact must be inside the narrower demo cone.
+                    attacker_state.is_supersonic
+                        && attacker_state.phys.vel.dot(rot.x_axis).abs()
+                            >= consts::car::supersonic::MAINTAIN_MIN_SPEED
+                        && in_demo_cone
+                }
             };
             if is_demo && !self.config.mutators.enable_team_demos {
                 is_demo = attacker.team != victim.team;
@@ -1022,6 +1059,7 @@ impl Arena {
                 victim.vel_impulse_cache += bump_impulse * UU_TO_BT;
             }
 
+            attacker.state.bump_other_car_id = victim_idx;
             attacker.state.bump_cooldown_timer = self.config.mutators.bump_cooldown_time;
 
             let contact_point = if is_swapped {
@@ -1037,6 +1075,44 @@ impl Arena {
                 is_demo,
             }));
         }
+    }
+
+    /// RL's rectangular forward cone test (translated verbatim from RocketSim
+    /// C++ `IsHitLocationWithinForwardAngle`). For pitch, project the direction
+    /// into the forward-up plane by subtracting the right component; for yaw,
+    /// into the forward-right plane by subtracting the up component. Both
+    /// angles must be within their limits (independent axes). RL applies a
+    /// small asymmetric widening: the projected-out component is scaled by
+    /// 1/1.01 if positive or 1.01 if negative.
+    fn inside_cone(
+        dir_to_other: Vec3A,
+        fwd: Vec3A,
+        right: Vec3A,
+        up: Vec3A,
+        max_yaw_rad: f32,
+        max_pitch_rad: f32,
+    ) -> bool {
+        fn angle_against_fwd(projected: Vec3A, fwd: Vec3A) -> f32 {
+            let c = projected.dot(fwd).clamp(-1.0, 1.0);
+            c.acos()
+        }
+
+        // Pitch: project out the right component.
+        let rc = dir_to_other.dot(right);
+        let rc = if rc >= 0.0 { rc * (1.0 / 1.01) } else { rc * 1.01 };
+        let proj_p = (dir_to_other - right * rc).normalize_or_zero();
+        let pitch = angle_against_fwd(proj_p, fwd);
+        if pitch > max_pitch_rad {
+            return false;
+        }
+
+        // Yaw: project out the up component.
+        let uc = dir_to_other.dot(up);
+        let uc = if uc >= 0.0 { uc * (1.0 / 1.01) } else { uc * 1.01 };
+        let proj_y = (dir_to_other - up * uc).normalize_or_zero();
+        let yaw = angle_against_fwd(proj_y, fwd);
+
+        yaw <= max_yaw_rad
     }
 
     #[cfg(debug_assertions)]

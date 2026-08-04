@@ -15,6 +15,7 @@ mod car_order;
 mod compare;
 mod config;
 mod deep_dive;
+#[allow(dead_code)]
 mod diagnose;
 mod measure;
 mod recording;
@@ -105,6 +106,16 @@ fn test_recording(recording: &Recording) {
             cont.final_pos_err.y,
             cont.final_pos_err.z,
         );
+        if cont.ticks > 0 {
+            println!(
+                "[{}] CONTINUOUS ball: max_pos={:.2}@t{} max_vel={:.2}@t{}",
+                recording.name,
+                cont.ball_max_pos,
+                cont.ball_max_pos_tick,
+                cont.ball_max_vel,
+                cont.ball_max_vel_tick,
+            );
+        }
     }
 
     // ── Deep dive ──

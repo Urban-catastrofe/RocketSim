@@ -25,6 +25,29 @@ fn is_ball_sentinel(phys: &PhysRecord) -> bool {
     phys.pos.z < -1000.0
 }
 
+/// The logger parks a demoed car at the origin (0,0,0) with zero velocity but
+/// WITHOUT setting `is_demoed`. A real car centre cannot sit below ~z=17 on
+/// flat ground (its hitbox keeps it above the floor), so a near-origin position
+/// with zero velocity marks a parked/demoed car — the sim restoring that pose
+/// and running full physics fabricates a huge divergence (e.g. the ground
+/// shoving the embedded hitbox upward at ~158 UU/s).
+fn is_car_sentinel(phys: &PhysRecord) -> bool {
+    // The logger parks a demoed car at the exact origin with zero velocity and
+    // rotation. A real car centre never sits at the arena origin at rest (the
+    // floor keeps it at z~17), so an origin-parked, inert pose marks a parked
+    // car — the sim restoring that pose and running full physics fabricates a
+    // huge divergence (the ground shoves the embedded hitbox upward).
+    let v = phys.lin_vel;
+    let w = phys.ang_vel;
+    let v_len_sq = v.x * v.x + v.y * v.y + v.z * v.z;
+    let w_len_sq = w.x * w.x + w.y * w.y + w.z * w.z;
+    phys.pos.x.abs() < 1.0
+        && phys.pos.y.abs() < 1.0
+        && phys.pos.z < 5.0
+        && v_len_sq < 25.0
+        && w_len_sq < 1.0
+}
+
 /// Max displacement any entity can physically travel in one recorded step.
 /// Cars top out near 2300 UU/s (~19 UU/tick at 120 Hz) and the ball near
 /// ~50 UU/tick, so anything beyond this is a game-state discontinuity — a goal
@@ -141,7 +164,6 @@ pub fn set_state_to_record_tick(
         // values leak from the previous tick (or from a shard's fresh arena),
         // making single- and multi-threaded runs disagree.
         cs.world_contact_normal = None;
-        cs.bump_cooldown_timer = 0.0;
         cs.supersonic_grace_timer = 0.0;
         cs.boosting_time = 0.0;
         cs.time_since_boosted = 0.0;
@@ -216,7 +238,7 @@ fn run_per_tick_shard(recording: &Recording, shard: &[usize]) -> Report {
             let real = &to_tick.car_records[j];
             // A demoed car is parked/absent (the logger parks it at origin);
             // measuring it against the sim fabricates divergence.
-            if real.is_demoed {
+            if real.is_demoed || is_car_sentinel(&real.phys) {
                 continue;
             }
             let cs: CarState = *arena.get_car_state(car_idx);
@@ -300,6 +322,12 @@ pub struct ContinuousSummary {
     pub max_vel_tick: usize,
     /// Final position error broken into x/y/z (the compounding direction).
     pub final_pos_err: glam::Vec3A,
+    /// Ball divergence (max pos / vel / tick), when the recording has a real
+    /// ball (not the parked sentinel).
+    pub ball_max_pos: f32,
+    pub ball_max_pos_tick: usize,
+    pub ball_max_vel: f32,
+    pub ball_max_vel_tick: usize,
 }
 
 /// Continuous mode: state set once at tick 0, then runs freely. Tracks the
@@ -346,6 +374,21 @@ pub fn run_continuous(
         }
         summary.final_pos_err = cs.phys.pos - glam::Vec3A::from(real.phys.pos);
         summary.ticks += 1;
+
+        let ball_real = &to_tick.ball_record;
+        if !is_ball_sentinel(ball_real) {
+            let bs: BallState = *arena.get_ball_state();
+            let b_pos_delta = (bs.phys.pos - glam::Vec3A::from(ball_real.pos)).length();
+            let b_vel_delta = (bs.phys.vel - glam::Vec3A::from(ball_real.lin_vel)).length();
+            if b_pos_delta > summary.ball_max_pos {
+                summary.ball_max_pos = b_pos_delta;
+                summary.ball_max_pos_tick = i;
+            }
+            if b_vel_delta > summary.ball_max_vel {
+                summary.ball_max_vel = b_vel_delta;
+                summary.ball_max_vel_tick = i;
+            }
+        }
     }
 
     summary

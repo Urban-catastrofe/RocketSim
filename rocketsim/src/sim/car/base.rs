@@ -477,42 +477,53 @@ impl Car {
     ) {
         let up_dir = self.state.get_up_dir();
 
-        // Jump activation (continuous sim): start a new jump on the ground.
+        // Check jump activation
         if !self.state.has_jumped && self.state.is_on_ground && jump_pressed {
             self.state.is_jumping = true;
             self.state.has_jumped = true;
             self.state.jump_time = 0.0;
         }
 
-        // Apply the full jump impulse on the activation tick. The recording
-        // stores is_jumping=true + jump_time=0 on the tick the jump starts;
-        // the impulse is applied once here, matching RL's single-tick impulse.
-        if self.state.is_jumping && self.state.jump_time == 0.0 {
-            let jump_force = up_dir * mutator_config.jump_immediate_force * UU_TO_BT;
-            rb.add_impulse(Some("Jump"), Impulse::Linear(jump_force), false, false);
+        // Apply forces
+        if self.state.is_jumping {
+            // Jump started, apply initial boost force
+            if self.state.jump_time == 0.0 {
+                let jump_start_force = up_dir * mutator_config.jump_immediate_force * UU_TO_BT;
+                rb.add_impulse(
+                    Some("Jump"),
+                    Impulse::Linear(jump_start_force),
+                    false,
+                    false,
+                );
+            }
+
+            let jump_force = up_dir * mutator_config.jump_accel * const { UU_TO_BT * TICK_TIME };
+            rb.add_impulse(Some("Jump"), Impulse::Linear(jump_force), false, true);
+
+            self.state.jump_time += TICK_TIME;
+            self.state.is_jumping = self.state.jump_time < car_consts::jump::MIN_TIME
+                || (self.state.controls.jump && self.state.jump_time < car_consts::jump::MAX_TIME);
         }
 
+        // Update jump state
         if self.state.has_jumped {
-            self.state.jump_time += TICK_TIME;
+            if !self.state.is_jumping {
+                self.state.jump_time += TICK_TIME;
+            }
 
-            // RL ends is_jumping at liftoff (~MIN_TIME ticks), not when the
-            // button is released. Only keep is_jumping true if it was already
-            // true — never re-activate mid-flight.
-            self.state.is_jumping = self.state.is_jumping
-                && !self.state.is_on_ground
-                && self.state.jump_time < car_consts::jump::MIN_TIME;
-
-            // Reset has_jumped on landing
+            // Possibly reset `has_jumped`
             if self.state.is_on_ground
                 && self.state.jump_time
                     > const { car_consts::jump::MIN_TIME + car_consts::jump::RESET_TIME_PAD }
             {
+                // Don't reset the jump just yet, we might still be leaving the ground
+                // This fixes the bug where jump is reset before we actually leave the ground after a minimum-time jump
+                // TODO: RL does something similar to this time-pad, but not exactly the same
                 self.state.has_jumped = false;
+                self.state.is_jumping = false;
                 self.state.jump_time = 0.0;
             }
         }
-
-        self.state.has_jumped |= self.state.is_jumping;
     }
 
     fn update_auto_flip(&mut self, rb: &mut RigidBody, jump_pressed: bool) {
@@ -804,7 +815,6 @@ impl Car {
 
         let rb = &mut collision_world.bodies_mut()[self.rigid_body_idx];
 
-        // TODO: Refactor and move
         let num_wheels_in_contact = self.state.num_wheels_in_contact();
 
         self.update_wheels(rb, num_wheels_in_contact, forward_speed_uu);

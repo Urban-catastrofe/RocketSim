@@ -198,6 +198,14 @@ pub mod car {
     pub mod bump {
         pub const COOLDOWN_TIME: f32 = 0.25;
         pub const MIN_FORWARD_DIST: f32 = 64.5;
+
+        // RL's rectangular forward cone (from RocketSim C++ / RL bytecode):
+        // anything outside the (wider) bump cone is a non-event; the narrower
+        // demo cone additionally gates demolitions.
+        pub const BUMP_CONE_YAW_RAD: f32 = 70.0_f32.to_radians();
+        pub const BUMP_CONE_PITCH_RAD: f32 = 36.869_896_f32.to_radians();
+        pub const DEMO_CONE_YAW_RAD: f32 = 45.572_994_f32.to_radians();
+        pub const DEMO_CONE_PITCH_RAD: f32 = 36.869_896_f32.to_radians();
     }
 
     pub mod spawn {
