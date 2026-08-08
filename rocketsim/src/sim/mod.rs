@@ -15,6 +15,7 @@ mod user_info_types;
 
 pub use arena::*;
 pub use ball::*;
+pub use ball_hit::BallHitState;
 pub use boost_pad::*;
 pub use car::*;
 pub use collision_mesh_file::CollisionMeshFile;

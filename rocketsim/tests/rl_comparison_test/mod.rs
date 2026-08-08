@@ -10,10 +10,13 @@
 //! [`config`].
 
 use crate::rl_comparison_test::recording::Recording;
+use std::sync::OnceLock;
 
 mod car_order;
 mod compare;
 mod config;
+#[cfg(feature = "cpp-compare")]
+mod cpp_runner;
 mod deep_dive;
 #[allow(dead_code)]
 mod diagnose;
@@ -21,6 +24,7 @@ mod measure;
 mod recording;
 mod report;
 mod residual;
+mod rollout;
 mod runner;
 mod state;
 mod stats;
@@ -89,6 +93,55 @@ fn test_recording(recording: &Recording) {
         println!("{line}");
     }
 
+    // ── C++ RocketSim comparison (on-demand via RLCPP=1, cpp-compare feature) ──
+    if cfg.cpp_compare {
+        #[cfg(feature = "cpp-compare")]
+        {
+            let mut cpp_report = cpp_runner::run_cpp_per_tick(recording, &cfg);
+            let mut cpp_cfg = cfg.clone();
+            cpp_cfg.gate = GateMode::Off;
+            cpp_cfg.deep_dive = DeepDiveMode::Never;
+            let (_, cpp_lines) = report::evaluate(&mut cpp_report, &cpp_cfg);
+            for line in &cpp_lines {
+                println!("{line}");
+            }
+            for line in cpp_runner::comparison_lines(&mut report, &mut cpp_report, &cfg) {
+                println!("{line}");
+            }
+            for line in cpp_runner::tail_comparison_lines(&mut report, &mut cpp_report, &cfg) {
+                println!("{line}");
+            }
+        }
+        #[cfg(not(feature = "cpp-compare"))]
+        {
+            println!(
+                "[{}] RLCPP=1 requires the cpp-compare feature; rebuild with: \
+                 cargo test -p rocketsim --features cpp-compare",
+                recording.name,
+            );
+        }
+    }
+
+    // ── Rollout mode (RLROLL=1s / 2s / <ticks>): compounding-error growth ──
+    if cfg.rollout_ticks > 0 {
+        let rollout_report = rollout::run_rollout(recording, &cfg);
+        for line in rollout::rollout_lines(&rollout_report, &cfg) {
+            println!("{line}");
+        }
+        #[cfg(feature = "cpp-compare")]
+        if cfg.cpp_compare {
+            let cpp_rollout = cpp_runner::run_cpp_rollout(recording, &cfg);
+            for line in rollout::rollout_lines(&cpp_rollout, &cfg) {
+                println!("{line}");
+            }
+            for line in
+                cpp_runner::rollout_comparison_lines(&rollout_report, &cpp_rollout, &cfg)
+            {
+                println!("{line}");
+            }
+        }
+    }
+
     // ── Continuous mode (informational, opt-in via RLCONT=1) ──
     if cfg.continuous {
         let (mut arena2, car_idcs2) = runner::make_arena(num_cars);
@@ -150,9 +203,16 @@ fn test_recording(recording: &Recording) {
 // Called from each generated test file.
 #[allow(unused)]
 fn run_comparison_test(name: &str, recording_bytes: &[u8]) {
-    if !rocketsim::is_initialized() {
-        rocketsim::init_from_default(true).unwrap();
-    }
+    // `is_initialized()` turns true as soon as init starts, but the collision
+    // shapes are only written at the very end — so a bare `is_initialized()`
+    // check races under multi-threaded test runs. Gate the whole init behind a
+    // single OnceLock so exactly one thread runs it and the rest block.
+    static ARENA_READY: OnceLock<()> = OnceLock::new();
+    ARENA_READY.get_or_init(|| {
+        if !rocketsim::is_initialized() {
+            rocketsim::init_from_default(true).unwrap();
+        }
+    });
     let mut recording = Recording::from_bytes(name, recording_bytes).unwrap();
     // Stabilize car identity (logger array order is unreliable); makes
     // index-based restore/compare valid. No-op for 0/1-car recordings.

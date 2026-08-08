@@ -21,7 +21,7 @@ use super::stats::Field;
 /// is not part of a (car-focused) scenario. A real ball is always inside the
 /// arena (z >= ~ball radius), so a deeply-negative z marks an absent ball —
 /// comparing against it would fabricate a huge divergence.
-fn is_ball_sentinel(phys: &PhysRecord) -> bool {
+pub fn is_ball_sentinel(phys: &PhysRecord) -> bool {
     phys.pos.z < -1000.0
 }
 
@@ -31,7 +31,7 @@ fn is_ball_sentinel(phys: &PhysRecord) -> bool {
 /// with zero velocity marks a parked/demoed car — the sim restoring that pose
 /// and running full physics fabricates a huge divergence (e.g. the ground
 /// shoving the embedded hitbox upward at ~158 UU/s).
-fn is_car_sentinel(phys: &PhysRecord) -> bool {
+pub fn is_car_sentinel(phys: &PhysRecord) -> bool {
     // The logger parks a demoed car at the exact origin with zero velocity and
     // rotation. A real car centre never sits at the arena origin at rest (the
     // floor keeps it at z~17), so an origin-parked, inert pose marks a parked
@@ -57,11 +57,11 @@ const MAX_PHYS_DISPLACEMENT: f32 = 100.0;
 
 /// Restore+step cycles to run on a fresh shard arena before measuring, so the
 /// Bullet contact manifolds settle (a cold arena's first steps diverge).
-const SHARD_WARMUP_TICKS: usize = 2;
+pub const SHARD_WARMUP_TICKS: usize = 2;
 
 /// True if the recording's `i -> i + stride` transition is non-physical (any
 /// car or the ball jumps farther than [`MAX_PHYS_DISPLACEMENT`]).
-fn has_discontinuity(recording: &Recording, i: usize, stride: usize) -> bool {
+pub fn has_discontinuity(recording: &Recording, i: usize, stride: usize) -> bool {
     let from = &recording.ticks[i];
     let to = &recording.ticks[i + stride];
 
@@ -140,6 +140,58 @@ pub fn set_state_to_record_tick(
             cs.flip_time = rocketsim::consts::car::flip::TORQUE_TIME;
         }
 
+        // The observer only sets is_flipping on the FIRST flip tick and maps
+        // double_jumped_or_flipped to has_flipped only while is_flipping, so
+        // the sim's flip state collapses after tick 1 and it never applies the
+        // flip's z-damping (flip_time in [Z_DAMP_START, Z_DAMP_END]) — the
+        // post-flip vertical-velocity then diverges. Reconstruct the
+        // persistent flip state: a flip (vs a double jump) has flip_time
+        // incrementing past 0, and a flip still IN PROGRESS has a real
+        // rotation (the car is tumbling). A finished flip (e.g. a wall-jump
+        // that flies straight up, ang_vel≈0) must NOT be re-activated.
+        let raw_double_jumped_or_flipped = tick.car_records[i].double_jumped_or_flipped;
+        if raw_double_jumped_or_flipped && cs.flip_time > 0.0 {
+            // A fresh flip tumbles the car hard around a horizontal axis
+            // (ang_vel's world x/y components dominate, magnitude ~2-5.5).
+            // A later tumble (auto-roll landing, flip afterglow) or a
+            // yaw/tornado spin must NOT be re-activated.
+            let av = tick.car_records[i].phys.ang_vel;
+            let hard_tumble = (av.x * av.x + av.y * av.y).sqrt() > 2.0;
+            // Only within the flip's active phase (through the z-damp window);
+            // beyond that the flip is over and has_flipped would wrongly lock
+            // pitch air-control (auto_roll, flip afterglow).
+            let active = cs.flip_time <= rocketsim::consts::car::flip::Z_DAMP_END;
+            if hard_tumble && active {
+                cs.has_flipped = true;
+                cs.has_double_jumped = false;
+                // Re-open is_flipping ONLY inside the z-damp window AND while
+                // the car is actually tumbling off-vertical (a nose-down flip
+                // dives — up-dir z drops below ~0.9). A level auto-roll tumble
+                // (up-dir z ≈ 1.0) must not fire the z-damp.
+                let zd = rocketsim::consts::car::flip::Z_DAMP_START..=rocketsim::consts::car::flip::Z_DAMP_END;
+                let up_z = tick.car_records[i].phys.rot.rows[2].z;
+                // Right-side-up but tilted off-vertical (0 < upz < 0.9): a
+                // nose-down flip. An upside-down tumble (upz < 0, e.g. the
+                // auto-roll landing) is not a flip and must not z-damp.
+                if zd.contains(&cs.flip_time) && up_z > 0.0 && up_z < 0.9 {
+                    cs.is_flipping = true;
+                }
+            }
+        }
+
+        // Same class of bug for the jump: the RLPR observer reports
+        // is_jumping=true + jump_time=0, but the velocity field tells us whether
+        // the immediate force was ALREADY applied:
+        //   * SOLO recordings: the state carries the post-impulse velocity
+        //     (vz ≈ 295 UU/s) — restoring jump_time=0 would make `update_jump`
+        //     re-apply the immediate force, doubling the launch (vz ≈ 590).
+        //   * MATCH recordings: the state still has vz ≈ 0 (grounded) — the
+        //     impulse is applied DURING this tick, so the sim MUST apply it.
+        // Decide from the vertical velocity instead of bumping unconditionally.
+        if cs.is_jumping && cs.jump_time == 0.0 && cs.phys.vel.z > 100.0 {
+            cs.jump_time = rocketsim::consts::TICK_TIME;
+        }
+
         // The RLPR format doesn't store per-wheel contact state, but the
         // sim derives is_on_ground from wheels_with_contact at step start.
         // Without this, the step function overwrites our restored is_on_ground
@@ -150,13 +202,20 @@ pub fn set_state_to_record_tick(
             [false; 4]
         };
 
-        // With v2 RLPR recordings, air_time_since_jump is populated by the
-        // observer. Use the recording value directly — the old forced 2.0
-        // (to close the double-jump window) would cause false divergence on
-        // every airborne tick. If the recording has 0 (v1 or grounded),
-        // still close the window to prevent false flips.
+        // The RLPR observer writes air_time_since_jump=0 on every tick (the
+        // field is broken/unpopulated), so the old forced 2.0 permanently
+        // closed the double-jump/flip window and the sim missed every airborne
+        // flip in match replays. Reconstruct it instead: the recording's
+        // air_time equals time-since-jump-start while airborne, and the jump's
+        // active phase lasts at most jump::MAX_TIME, so
+        // air_time_since_jump ≈ air_time - MAX_TIME. Only jumpers can flip —
+        // an airborne car that never jumped keeps the window closed.
         if cs.air_time_since_jump == 0.0 {
-            cs.air_time_since_jump = 2.0; // > DOUBLEJUMP_MAX_DELAY (1.25)
+            cs.air_time_since_jump = if cs.has_jumped {
+                (cs.air_time - rocketsim::consts::car::jump::MAX_TIME).max(0.0)
+            } else {
+                2.0 // > DOUBLEJUMP_MAX_DELAY (1.25)
+            };
         }
 
         // Reset internal fields the recording does NOT capture to defaults so
@@ -183,7 +242,7 @@ pub fn set_state_to_record_tick(
 }
 
 /// Upper loop bound shared by both modes.
-fn loop_bound(recording: &Recording, max_ticks: Option<usize>) -> usize {
+pub fn loop_bound(recording: &Recording, max_ticks: Option<usize>) -> usize {
     let stride = recording.stride;
     let raw_max = recording.ticks.len().saturating_sub(stride + 1);
     let n = max_ticks.map_or(raw_max, |m| m.min(raw_max));

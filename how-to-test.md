@@ -57,11 +57,27 @@ config-driven module:
 
 The impulse is a *pure function of the config* and the hit geometry, so the
 residual tool can fit the constants: change one config value, re-run the 3v3
-recordings, watch the ball vel p95 move. Known issue: the extra impulse is
-currently **neutralized** — `on_hit` adds it to `accum_lin_vel` after the
-solver runs, and `step_tick`'s `clear_accum_forces()` wipes it before the next
-solver applies it. The C++ original applies it in `_FinishPhysicsTick`. Making
-it effective (and re-fitting the factor curve) is pending Phase 2 calibration.
+recordings, watch the ball vel p95 move.
+
+**Impulse application (2026-08):** the extra impulse is now applied at the
+**end of the contact tick** in `finish_physics_tick` (matching C++
+`_FinishPhysicsTick`). Previously it was queued to `pre_tick_update` of the
+next tick, which the per-tick restore harness wiped before it ever fired — the
+sim's car-ball hits were permanently missing the carried impulse. The default
+cadence is `OncePerEpisode` (one impulse per contact, re-armed after the ball
+separates), which beats the C++'s `EveryOtherTick` on sustained-contact cases
+(`car_ball_soft_touch` 6.5 vs C++ 55.8, dribble 13.8 vs 17.7). Tradeoff: the
+game spreads each hit over **2 ticks** (~35/65 split) in the recording, while
+the sim (and C++) fire once — so per-tick cases dominated by that spread
+(`car_ball_backwall_car_ball_approach`, `mech_flip_reset_simple`) score
+slightly worse per-tick even though the *total* impulse matches the game. The
+2-tick split is **not modelable** (verified 2026-08): in the per-tick restore
+harness the 2nd half double-counts (the restore already contains the game's
+recorded 2nd-half velocity), and in the continuous pass it has a negligible
+trajectory effect (a 1000 UU/s impulse delivered in one tick vs split 20/80
+over two ticks converges in velocity immediately, with a ~1.7 UU max position
+offset — measured with a dedicated test). Modeling it would not improve
+accuracy.
 
 ## Quick Start
 
@@ -124,11 +140,69 @@ order/quantization, often acceptable.
 | `RLDEEP_RADIUS` | context ticks on *each side* of the deep-dive center | `15` |
 | `RLCAR` | focus one car index (`0`…), or `all` | `all` |
 | `RLTICK` | deep-dive a specific tick instead of the worst | worst |
-| `RLSEG` | `1` to print per-situation breakdowns | off |
+| `RLSEG` | `1` to also print per-situation breakdowns | off |
 | `RLTHREADS` | worker threads for the per-tick pass | all cores (≤16) |
 | `RLCONT` | `1` to also run the sequential continuous (compounding) pass | off |
+| `RLCPP` | `1` to also replay through the **C++ RocketSim** (`rocketsim_rs` bindings) and report side-by-side. Requires `--features cpp-compare` | off |
+| `RLROLL` | rollout mode: restore at sampled ticks, free-run `1s`/`2s`/`<ticks>` with recorded controls, report the error growth curve | off |
+| `RLROLL_STRIDE` | distance (ticks) between rollout start ticks | `120` |
 | `RL_POS_TOL` / `RL_VEL_TOL` / `RL_ANGVEL_TOL` / `RL_ROT_TOL` | budget overrides | 0.1 / 0.5 / 0.5 / 0.02 |
 | `RL_PERCENTILE` | gate percentile (0..1) | 0.95 |
+
+## C++ RocketSim Comparison (RLCPP)
+
+The original C++ RocketSim (via the `rocketsim_rs` crates.io bindings) can run
+the exact same per-tick restore pass — and rollout pass — as a reference:
+whatever C++ nails and our port misses points straight at a bug in our port,
+and whatever both sims miss equally is a shared RocketSim limitation, not a
+porting bug.
+
+The C++ sim is compiled on first use (bullet3 + RocketSim, a few minutes) and
+is **opt-in** so normal test runs stay fast:
+
+```bash
+# Build + run with the C++ reference pass:
+RLGATE=off RLCPP=1 cargo test -p rocketsim --features cpp-compare case_3v3 -- --nocapture --test-threads=1
+```
+
+Output: the normal report lines, then the same lines under the `|cpp` report
+name, then a `CPP-COMPARE` ranking (ratio > 1 = C++ more accurate at p95).
+
+Caveats:
+- The C++ default arena uses `noBallRot=true`: the ball's rotation matrix is
+  never integrated, so C++ "ball rot" error is 0 by construction. The harness
+  annotates those rows instead of ranking them.
+- Demoed/parked cars are parked far below the arena in the C++ pass (restoring
+  several of them at the origin makes bullet's solver produce NaN).
+- The C++ pass never gates; it is informational only.
+
+## Rollout Mode (RLROLL) — compounding errors
+
+The per-tick pass restores full state every tick, so it only ever measures one
+physics step in isolation. Rollout mode restores the recorded state at sampled
+start ticks, then free-runs the sim for N ticks with the recording's controls,
+measuring every step — an error-vs-time **growth curve** per entity+field.
+Flat curve ≈ stable sim; climbing curve ≈ a compounding bug. This is how you
+trace extended failures that only appear after several ticks.
+
+```bash
+# 1-second rollouts starting every 120 ticks of the recording:
+RLGATE=off RLROLL=1s cargo test -p rocketsim case_3v3 -- --nocapture --test-threads=1
+
+# 2-second rollouts, denser starts, combined with the C++ reference:
+RLGATE=off RLROLL=2s RLROLL_STRIDE=60 RLCPP=1 \
+  cargo test -p rocketsim --features cpp-compare case_3v3 -- --nocapture --test-threads=1
+```
+
+`ROLL` lines show the mean error at sampled horizons
+(`t1 t5 t15 t30 t60 t120 …`) plus `worst_end=<mag>@start<tick>` — the start
+tick of the worst rollout, ready for a deep dive:
+`RLDEEP=always RLTICK=<start> cargo test case_<name>`.
+
+With `RLCPP=1` the C++ sim runs the same rollouts and a `ROLLOUT-CPP-COMPARE`
+table ranks the final-horizon errors. On 3v3 both sims compound at nearly the
+same rate (ratio ≈ 1.0), i.e. the long-horizon divergence is a shared RocketSim
+limit, not a port bug.
 
 ## Deep Dive (failure mode)
 

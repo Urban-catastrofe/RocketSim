@@ -290,10 +290,10 @@ impl Car {
                 continue;
             };
 
-            if !raycast_info.is_in_contact_with_world {
-                continue;
-            }
-
+            // Match C++ Car::_UpdateWheels: friction is computed for ANY
+            // raycast hit (including dynamic bodies like the ball), not just
+            // static world contacts. The is_in_contact_with_world gate below
+            // is only for the sticky force.
             let lat_dir = wheel.axle_dir;
             let long_dir = lat_dir.cross(raycast_info.contact_normal);
 
@@ -477,52 +477,57 @@ impl Car {
     ) {
         let up_dir = self.state.get_up_dir();
 
-        // Check jump activation
-        if !self.state.has_jumped && self.state.is_on_ground && jump_pressed {
-            self.state.is_jumping = true;
-            self.state.has_jumped = true;
-            self.state.jump_time = 0.0;
-        }
-
-        // Apply forces
-        if self.state.is_jumping {
-            // Jump started, apply initial boost force
-            if self.state.jump_time == 0.0 {
-                let jump_start_force = up_dir * mutator_config.jump_immediate_force * UU_TO_BT;
-                rb.add_impulse(
-                    Some("Jump"),
-                    Impulse::Linear(jump_start_force),
-                    false,
-                    false,
-                );
-            }
-
-            let jump_force = up_dir * mutator_config.jump_accel * const { UU_TO_BT * TICK_TIME };
-            rb.add_impulse(Some("Jump"), Impulse::Linear(jump_force), false, true);
-
-            self.state.jump_time += TICK_TIME;
-            self.state.is_jumping = self.state.jump_time < car_consts::jump::MIN_TIME
-                || (self.state.controls.jump && self.state.jump_time < car_consts::jump::MAX_TIME);
-        }
-
-        // Update jump state
-        if self.state.has_jumped {
-            if !self.state.is_jumping {
-                self.state.jump_time += TICK_TIME;
-            }
-
-            // Possibly reset `has_jumped`
-            if self.state.is_on_ground
+        // Allow the jump to be reset once grounded and no longer jumping, but
+        // keep it alive for a grace window after a minimum jump so we don't
+        // consume it while the car is still leaving the ground (matches C++
+        // `_UpdateJump` and Rocket League's timing pad).
+        if self.state.is_on_ground && !self.state.is_jumping {
+            if !(self.state.has_jumped
                 && self.state.jump_time
-                    > const { car_consts::jump::MIN_TIME + car_consts::jump::RESET_TIME_PAD }
+                    < const { car_consts::jump::MIN_TIME + car_consts::jump::RESET_TIME_PAD })
             {
-                // Don't reset the jump just yet, we might still be leaving the ground
-                // This fixes the bug where jump is reset before we actually leave the ground after a minimum-time jump
-                // TODO: RL does something similar to this time-pad, but not exactly the same
                 self.state.has_jumped = false;
-                self.state.is_jumping = false;
                 self.state.jump_time = 0.0;
             }
+        }
+
+        if self.state.is_jumping {
+            // Continue the jump while inside the minimum window or while the
+            // button is held (C++ `_UpdateJump` continuation).
+            self.state.is_jumping = self.state.jump_time < car_consts::jump::MIN_TIME
+                || (self.state.controls.jump && self.state.jump_time < car_consts::jump::MAX_TIME);
+        } else if self.state.is_on_ground && jump_pressed {
+            // Start jumping: the immediate force fires ONLY on the activation
+            // tick. A state that merely carries `is_jumping=true` with
+            // `jump_time=0` (e.g. a restored recording frame) must NOT re-fire
+            // it, or the launch velocity doubles (C++ applies the impulse in
+            // this branch, not from `jump_time == 0`).
+            self.state.is_jumping = true;
+            self.state.jump_time = 0.0;
+            let jump_start_force = up_dir * mutator_config.jump_immediate_force * UU_TO_BT;
+            rb.add_impulse(
+                Some("Jump"),
+                Impulse::Linear(jump_start_force),
+                false,
+                false,
+            );
+        }
+
+        if self.state.is_jumping {
+            self.state.has_jumped = true;
+
+            // Rocket League (and C++ RocketSim) scale the sustained jump accel
+            // down before the minimum jump time has elapsed.
+            let mut jump_accel = mutator_config.jump_accel;
+            if self.state.jump_time < car_consts::jump::MIN_TIME {
+                jump_accel *= car_consts::jump::PRE_MIN_ACCEL_SCALE;
+            }
+            let jump_force = up_dir * jump_accel * const { UU_TO_BT * TICK_TIME };
+            rb.add_impulse(Some("Jump"), Impulse::Linear(jump_force), false, true);
+        }
+
+        if self.state.is_jumping || self.state.has_jumped {
+            self.state.jump_time += TICK_TIME;
         }
     }
 
@@ -808,37 +813,69 @@ impl Car {
             self.state.controls = self.state.controls.clamp();
         }
 
+        // Raycast the wheels against the world at the CURRENT transform so the
+        // contact/suspension state is fresh for the impulse application below.
+        // Mirrors the C++ `_PreTickUpdate` (which runs `updateVehicleFirst`
+        // before the bullet step).
+        self.bullet_vehicle.update_vehicle_first(collision_world, TICK_TIME);
+
+        let num_wheels_in_contact = {
+            let mut n = 0u8;
+            for (wheel, has_contact) in self
+                .bullet_vehicle
+                .wheels
+                .iter()
+                .zip(&mut self.state.wheels_with_contact)
+            {
+                let in_contact = wheel.raycast_info.is_some();
+                *has_contact = in_contact;
+                n += u8::from(in_contact);
+            }
+            self.state.is_on_ground = n >= 3;
+            n as usize
+        };
+
         let forward_speed_uu =
             collision_world.bodies()[self.rigid_body_idx].get_forward_speed() * BT_TO_UU;
 
         let jump_pressed = self.state.controls.jump && !self.state.prev_controls.jump;
 
-        let rb = &mut collision_world.bodies_mut()[self.rigid_body_idx];
-
-        let num_wheels_in_contact = self.state.num_wheels_in_contact();
-
-        self.update_wheels(rb, num_wheels_in_contact, forward_speed_uu);
-
-        if self.state.is_on_ground {
-            self.state.is_flipping = false;
-        } else {
-            self.update_air_torque(rb, num_wheels_in_contact == 0);
-        }
-
-        self.update_jump(rb, mutator_config, jump_pressed);
-        self.update_auto_flip(rb, jump_pressed);
-        self.update_double_jump_or_flip(rb, mutator_config, jump_pressed, forward_speed_uu);
-
-        if self.state.controls.throttle != 0.0
-            && ((0 < num_wheels_in_contact && num_wheels_in_contact < 4)
-                || self.state.world_contact_normal.is_some())
         {
-            self.update_auto_roll(rb, num_wheels_in_contact);
+            let rb = &mut collision_world.bodies_mut()[self.rigid_body_idx];
+
+            self.update_wheels(rb, num_wheels_in_contact, forward_speed_uu);
+
+            if self.state.is_on_ground {
+                self.state.is_flipping = false;
+            } else {
+                self.update_air_torque(rb, num_wheels_in_contact == 0);
+            }
+
+            self.update_jump(rb, mutator_config, jump_pressed);
+            self.update_auto_flip(rb, jump_pressed);
+            self.update_double_jump_or_flip(rb, mutator_config, jump_pressed, forward_speed_uu);
+
+            if self.state.controls.throttle != 0.0
+                && ((0 < num_wheels_in_contact && num_wheels_in_contact < 4)
+                    || self.state.world_contact_normal.is_some())
+            {
+                self.update_auto_roll(rb, num_wheels_in_contact);
+            }
+
+            self.state.world_contact_normal = None;
         }
 
-        self.state.world_contact_normal = None;
+        // Apply wheel suspension + friction impulses BEFORE the bullet world
+        // step so the position integrates them this tick (the C++ `_PreTickUpdate`
+        // calls `updateVehicleSecond` here). Previously applied in
+        // `post_tick_update` (after integration), which left the reported
+        // velocity leading the position by one tick.
+        self.bullet_vehicle.update_vehicle_second(collision_world, TICK_TIME);
 
-        self.update_boost(rb, mutator_config);
+        {
+            let rb = &mut collision_world.bodies_mut()[self.rigid_body_idx];
+            self.update_boost(rb, mutator_config);
+        }
     }
 
     pub(crate) fn post_tick_update(&mut self, collision_world: &mut DiscreteDynamicsWorld) {
@@ -878,24 +915,6 @@ impl Car {
             self.state.supersonic_grace_timer = 0.0;
         }
 
-        self.bullet_vehicle
-            .update_vehicle_first(collision_world, TICK_TIME);
-        self.bullet_vehicle
-            .update_vehicle_second(collision_world, TICK_TIME);
-        let mut num_wheels_in_contact = 0u8;
-        for (wheel, has_contact) in self
-            .bullet_vehicle
-            .wheels
-            .iter()
-            .zip(&mut self.state.wheels_with_contact)
-        {
-            let in_contact = wheel.raycast_info.is_some();
-            *has_contact = in_contact;
-            num_wheels_in_contact += u8::from(in_contact);
-        }
-
-        self.state.is_on_ground = num_wheels_in_contact >= 3;
-
         self.state.bump_cooldown_timer = (self.state.bump_cooldown_timer - TICK_TIME).max(0.0);
         self.state.prev_controls = self.state.controls;
     }
@@ -911,6 +930,12 @@ impl Car {
             rb.lin_vel += self.vel_impulse_cache;
             self.vel_impulse_cache = Vec3A::ZERO;
         }
+
+        // Clamp velocities at the END of the tick, matching the C++
+        // `_FinishPhysicsTick`. The start-of-tick clamp alone lets boost
+        // (and other impulses) push the car past MAX_SPEED mid-tick, so the
+        // sim cruises at ~2308 UU/s instead of RL's hard 2300 cap.
+        rb.limit_vels(car_consts::MAX_SPEED * UU_TO_BT, car_consts::MAX_ANG_SPEED);
 
         self.state.phys.pos = rb.get_world_trans().translation * BT_TO_UU;
         self.state.phys.vel = rb.lin_vel * BT_TO_UU;

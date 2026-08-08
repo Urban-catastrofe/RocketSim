@@ -51,6 +51,17 @@ pub struct HarnessConfig {
     /// Also run the sequential continuous (compounding) pass. Off by default
     /// because it doubles runtime on long replays and is informational only.
     pub continuous: bool,
+    /// Also replay the recording through the C++ RocketSim (via the
+    /// `rocketsim_rs` bindings) and report its accuracy side-by-side.
+    /// Requires building with `--features cpp-compare`.
+    pub cpp_compare: bool,
+    /// Rollout mode: restore the recorded state at sampled start ticks, then
+    /// free-run this many ticks with recorded controls and measure how the
+    /// error compounds (0 = off). `RLROLL=1s`/`2s` or a tick count.
+    pub rollout_ticks: usize,
+    /// Distance between rollout start ticks (120 = one rollout per recorded
+    /// second).
+    pub rollout_stride: usize,
 }
 
 impl Default for HarnessConfig {
@@ -65,6 +76,9 @@ impl Default for HarnessConfig {
             tolerance: PhysicsTolerance::default(),
             threads: default_threads(),
             continuous: false,
+            cpp_compare: false,
+            rollout_ticks: 0,
+            rollout_stride: 120,
         }
     }
 }
@@ -74,6 +88,25 @@ fn default_threads() -> usize {
         .map(|n| n.get())
         .unwrap_or(4)
         .clamp(1, 16)
+}
+
+/// Parse `RLROLL` as either a tick count (`RLROLL=240`) or a duration in
+/// seconds (`RLROLL=2s`, `RLROLL=0.5s`). 1 second = 120 ticks. Returns 0
+/// (off) when unset or malformed.
+fn parse_rollout_ticks() -> usize {
+    let raw = match std::env::var("RLROLL") {
+        Ok(s) if !s.trim().is_empty() => s.trim().to_lowercase(),
+        _ => return 0,
+    };
+    const TICKS_PER_SEC: f64 = 120.0;
+    if let Some(secs) = raw.strip_suffix('s') {
+        secs.trim()
+            .parse::<f64>()
+            .map(|v| (v * TICKS_PER_SEC).round() as usize)
+            .unwrap_or(0)
+    } else {
+        raw.parse::<usize>().unwrap_or(0)
+    }
 }
 
 impl HarnessConfig {
@@ -113,6 +146,16 @@ impl HarnessConfig {
             std::env::var("RLCONT").as_deref(),
             Ok("1") | Ok("true") | Ok("always")
         );
+
+        cfg.cpp_compare = matches!(
+            std::env::var("RLCPP").as_deref(),
+            Ok("1") | Ok("true") | Ok("always")
+        );
+
+        cfg.rollout_ticks = parse_rollout_ticks();
+        if let Ok(s) = env_usize("RLROLL_STRIDE") {
+            cfg.rollout_stride = s.clamp(1, 10_000);
+        }
 
         cfg.tolerance = cfg.tolerance.from_env();
         cfg

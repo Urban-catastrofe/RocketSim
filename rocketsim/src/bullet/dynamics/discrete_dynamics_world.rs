@@ -41,6 +41,11 @@ impl DiscreteDynamicsWorld {
         &self.collision_world.collision_objs
     }
 
+    #[inline]
+    pub fn set_gravity(&mut self, gravity: Vec3A) {
+        self.gravity = gravity;
+    }
+
     pub fn ray_test<T: QuadRayResultCallback>(
         &self,
         ray_from_world: &[Vec3A; 4],

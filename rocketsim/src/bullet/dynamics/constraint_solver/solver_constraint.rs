@@ -30,6 +30,12 @@ pub struct SolverConstraint {
     pub solver_body_id_a: usize,
     pub solver_body_id_b: usize,
     pub is_special: bool,
+    /// Softens the rigid-body normal/penetration response for car-car contacts
+    /// (real RL resolves car-car via the bump impulse; the physical response is
+    /// a weak secondary effect). The effective scale falls with impact speed so
+    /// slow crossings still separate while high-impact head-ons stay
+    /// bump-dominated.
+    pub is_car_car: bool,
 }
 
 impl SolverConstraint {
@@ -69,6 +75,7 @@ impl SolverConstraint {
         cp: &ManifoldPoint,
         friction_idx: usize,
         time_step: f32,
+        is_car_car: bool,
     ) -> Self {
         let mut constraint = Self {
             solver_body_id_a,
@@ -78,6 +85,7 @@ impl SolverConstraint {
             is_special: cp.is_special,
             lower_limit: 0.0,
             upper_limit: 1e10,
+            is_car_car,
             ..Default::default()
         };
 
@@ -169,6 +177,7 @@ impl SolverConstraint {
 
         let vel = vel0 - vel1;
         let rel_vel = cp.normal_world_on_b.dot(vel);
+        let approach = rel_vel.abs();
         let restitution = Self::restitution_curve(rel_vel, cp.combined_restitution).max(0.0);
 
         let penetration = cp.distance_1;
@@ -190,6 +199,16 @@ impl SolverConstraint {
             } else {
                 (vel_impulse, penetration_impulse)
             };
+
+        if self.is_car_car {
+            // Speed-dependent softening: full response at low impact speed,
+            // falling toward ~0 at supersonic head-ons. `approach` is the
+            // closing speed along the normal.
+            let scale =
+                (crate::sim::consts::car::hit_car_phys_soften_speed() / approach).clamp(0.0, 1.0);
+            self.rhs *= scale;
+            self.rhs_penetration *= scale;
+        }
     }
 
     fn setup_friction_constraint(

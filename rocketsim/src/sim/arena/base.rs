@@ -618,7 +618,8 @@ impl Arena {
         }
 
         let ball_rb = &mut self.bullet_world.bodies_mut()[self.ball.rigid_body_idx];
-        self.ball.finish_physics_tick(ball_rb);
+        self.ball
+            .finish_physics_tick(ball_rb, &self.config.mutators);
 
         if self.config.game_mode == GameMode::Dropshot
             && self.ball.state.ds_info.last_damage_tick == Some(self.tick_count)
@@ -658,6 +659,12 @@ impl Arena {
             &mut self.bullet_world.bodies_mut()[self.ball.rigid_body_idx],
             ball_state,
         );
+    }
+
+    pub fn set_mutator_config(&mut self, mutators: MutatorConfig) {
+        self.config.mutators = mutators;
+        self.bullet_world
+            .set_gravity(self.config.mutators.gravity * UU_TO_BT);
     }
 
     pub const fn get_ball_state(&self) -> &BallState {

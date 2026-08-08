@@ -1,5 +1,5 @@
 [workspace]
-package.version = "0.2.0"
+package.version = "3.0.0"
 package.license-file = "LICENSE"
 resolver = "3"
 members = [

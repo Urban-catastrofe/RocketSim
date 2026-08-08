@@ -151,14 +151,6 @@ impl Ball {
         game_mode: GameMode,
         _mutator_config: &MutatorConfig, // TODO: Remove
     ) {
-        // Apply the extra hit impulse computed during the previous tick's
-        // contact, so it lands on the tick *after* the reactive impulse —
-        // matching RL's two-tick hit split.
-        if self.pending_hit_impulse != Vec3A::ZERO {
-            rb.lin_vel += self.pending_hit_impulse;
-            self.pending_hit_impulse = Vec3A::ZERO;
-        }
-
         match game_mode {
             GameMode::Heatseeker => {
                 if self.state.hs_info.y_target_dir == 0 {
@@ -257,7 +249,33 @@ impl Ball {
         }
     }
 
-pub(crate) fn finish_physics_tick(&mut self, rb: &mut RigidBody) {
+pub(crate) fn finish_physics_tick(
+        &mut self,
+        rb: &mut RigidBody,
+        mutator_config: &MutatorConfig,
+    ) {
+        // Apply the extra hit impulse queued by this tick's car-ball contact
+        // at the *end* of the same tick (matching C++ `_FinishPhysicsTick`).
+        // Applying it in `pre_tick_update` instead let the per-tick restore
+        // harness wipe the queued impulse before it ever fired.
+        if self.pending_hit_impulse != Vec3A::ZERO {
+            rb.lin_vel += self.pending_hit_impulse;
+            self.pending_hit_impulse = Vec3A::ZERO;
+        }
+
+        // Limit velocities (C++ Ball::_FinishPhysicsTick). The ball's angle
+        // can never exceed MAX_ANG_SPEED (6.0 rad/s) — without the clamp the
+        // wall-contact friction torque overshoots the real spin (e.g. rolling
+        // down the backboard: real pins at 6.0, the sim hit 14.06 in one tick).
+        let ball_max_speed_bt = mutator_config.ball_max_speed * UU_TO_BT;
+        if rb.lin_vel.length_squared() > ball_max_speed_bt * ball_max_speed_bt {
+            rb.lin_vel = rb.lin_vel.normalize() * ball_max_speed_bt;
+        }
+        let max_ang_speed = consts::ball::MAX_ANG_SPEED;
+        if rb.ang_vel.length_squared() > max_ang_speed * max_ang_speed {
+            rb.ang_vel = rb.ang_vel.normalize() * max_ang_speed;
+        }
+
         self.state.phys.vel = rb.lin_vel * BT_TO_UU;
         self.state.phys.ang_vel = rb.ang_vel;
 
@@ -275,10 +293,6 @@ pub(crate) fn finish_physics_tick(&mut self, rb: &mut RigidBody) {
         mutator_config: &MutatorConfig,
         tick_count: u64,
     ) {
-        // The ball is in contact with a car this tick — track it for the
-        // once-per-episode cadence.
-        self.state.ball_hit.last_contact_tick = Some(tick_count);
-
         let ctx = crate::sim::ball_hit::HitContext {
             ball_pos: self.state.phys.pos,
             ball_vel: self.state.phys.vel,
@@ -290,16 +304,24 @@ pub(crate) fn finish_physics_tick(&mut self, rb: &mut RigidBody) {
             car_up_z: car.state.phys.rot_mat.z_axis.z,
         };
 
+        // `can_fire` must see the *previous* contact state (was the ball
+        // separated last tick?) so the once-per-episode cadence can fire on
+        // the first contact tick of a fresh episode. Update the contact
+        // bookkeeping after the check.
         if crate::sim::ball_hit::can_fire(&self.state.ball_hit, &self.hit_config, tick_count) {
             let impulse = crate::sim::ball_hit::compute_impulse(&ctx, &self.hit_config);
             if impulse != Vec3A::ZERO {
-                // Queue for the next tick instead of `accum_lin_vel` (which is
-                // wiped by `clear_accum_forces()` before it can ever apply).
+                // Queue for the *end of this tick* (see `finish_physics_tick`),
+                // matching C++ `_FinishPhysicsTick`.
                 self.pending_hit_impulse +=
                     impulse * mutator_config.ball_hit_extra_force_scale * UU_TO_BT;
                 self.state.ball_hit.last_impulse_tick = Some(tick_count);
             }
         }
+
+        // The ball is in contact with a car this tick — track it for the
+        // once-per-episode cadence.
+        self.state.ball_hit.last_contact_tick = Some(tick_count);
 
         match game_mode {
             GameMode::Heatseeker => {

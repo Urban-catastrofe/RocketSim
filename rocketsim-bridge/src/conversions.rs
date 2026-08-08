@@ -123,7 +123,7 @@ pub fn car_state_to_ffi(s: &rocketsim::CarState) -> ffi::FfiCarState {
         is_boosting: s.is_boosting,
         boosting_time: s.boosting_time,
         is_supersonic: s.is_supersonic,
-        supersonic_time: s.supersonic_time,
+        supersonic_time: s.supersonic_grace_timer,
         handbrake_val: s.handbrake_val,
         is_auto_flipping: s.is_auto_flipping,
         auto_flip_timer: s.auto_flip_timer,
@@ -174,12 +174,13 @@ pub fn ffi_to_car_state(s: &ffi::FfiCarState) -> rocketsim::CarState {
         is_boosting: s.is_boosting,
         boosting_time: s.boosting_time,
         is_supersonic: s.is_supersonic,
-        supersonic_time: s.supersonic_time,
+        supersonic_grace_timer: s.supersonic_time,
         handbrake_val: s.handbrake_val,
         is_auto_flipping: s.is_auto_flipping,
         auto_flip_timer: s.auto_flip_timer,
         auto_flip_torque_scale: s.auto_flip_torque_scale,
         bump_cooldown_timer: s.bump_cooldown_timer,
+        bump_other_car_id: usize::MAX,
         world_contact_normal,
         is_demoed: s.is_demoed,
         demo_respawn_timer: s.demo_respawn_timer,
@@ -189,7 +190,7 @@ pub fn ffi_to_car_state(s: &ffi::FfiCarState) -> rocketsim::CarState {
 
 // BallState conversions
 pub fn ball_state_to_ffi(s: &rocketsim::BallState) -> ffi::FfiBallState {
-    let (last_hit_valid, last_hit_val) = match s.last_extra_hit_tick {
+    let (last_hit_valid, last_hit_val) = match s.ball_hit.last_impulse_tick {
         Some(t) => (true, t),
         None => (false, 0u64),
     };
@@ -229,16 +230,17 @@ pub fn ffi_to_ball_state(s: &ffi::FfiBallState) -> rocketsim::BallState {
                 None
             },
         },
-        last_extra_hit_tick: if s.last_extra_hit_tick_valid {
-            Some(s.last_extra_hit_tick)
-        } else {
-            None
+        ball_hit: rocketsim::BallHitState {
+            last_impulse_tick: if s.last_extra_hit_tick_valid {
+                Some(s.last_extra_hit_tick)
+            } else {
+                None
+            },
+            last_contact_tick: None,
         },
         tick_count_since_kickoff: s.tick_count_since_kickoff,
     }
 }
-
-// GameMode conversions
 pub fn u8_to_game_mode(v: u8) -> rocketsim::GameMode {
     match v {
         0 => rocketsim::GameMode::Soccar,

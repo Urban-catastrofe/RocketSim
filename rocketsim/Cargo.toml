@@ -17,9 +17,16 @@ rocketsim_derive = { path = "../rocketsim_derive" }
 rustc-hash.workspace = true
 zerocopy = { version = "0.8.34", features = ["derive"] }
 indexmap = "2.14.0"
+# C++ RocketSim bindings, only for the on-demand RLPR comparison pass
+# (RLCPP=1). Optional so the heavy C++/bullet build stays opt-in:
+#   cargo test -p rocketsim --features cpp-compare
+rocketsim_rs = { version = "0.37.0", optional = true, default-features = false }
 
 [dev-dependencies]
 clap = { version = "4.6.0", features = ["derive"] }
+
+[features]
+cpp-compare = ["dep:rocketsim_rs"]
 
 [target.'cfg(not(any(target_arch = "x86", target_arch = "x86_64")))'.dependencies]
 # use glam with experimental support for portable SIMD when not running on x86

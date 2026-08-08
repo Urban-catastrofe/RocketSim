@@ -58,7 +58,7 @@ impl Default for BallHitConfig {
             forward_scale: car_hit_impulse::FORWARD_SCALE,
             max_delta_vel_uu: car_hit_impulse::MAX_DELTA_VEL_UU,
             factor_curve: curves::BALL_CAR_EXTRA_IMPULSE_FACTOR,
-            cadence: HitCadence::EveryOtherTick,
+            cadence: HitCadence::OncePerEpisode,
         }
     }
 }

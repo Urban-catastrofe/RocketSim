@@ -115,6 +115,52 @@ pub fn dump_window(recording: &Recording, cfg: &HarnessConfig, center: usize, en
         let time_s = i as f32 * TICK_TIME / stride as f32;
         let marker = if i == center { ">>" } else { "  " };
 
+        // Ball-only recordings (no cars): focus the ball.
+        if num_cars == 0 {
+            let ball_state = arena.get_ball_state();
+            let delta = compute_delta(&ball_state.phys, &to_tick.ball_record);
+            let pos_e = delta.get(Field::Pos).mag;
+            let vel_e = delta.get(Field::Vel).mag;
+            let ang_e = delta.get(Field::AngVel).mag;
+            println!(
+                "[{}] DIVE {} t={:>6} ({:7.3}s) ball pos_e={:9.4} vel_e={:9.4} ang_e={:8.4}",
+                recording.name,
+                marker,
+                i,
+                time_s,
+                pos_e,
+                vel_e,
+                ang_e,
+            );
+            println!(
+                "[{}] DIVE        SIM  pos=({:.3},{:.3},{:.3}) vel=({:.3},{:.3},{:.3}) | REAL pos=({:.3},{:.3},{:.3}) vel=({:.3},{:.3},{:.3})",
+                recording.name,
+                ball_state.phys.pos.x,
+                ball_state.phys.pos.y,
+                ball_state.phys.pos.z,
+                ball_state.phys.vel.x,
+                ball_state.phys.vel.y,
+                ball_state.phys.vel.z,
+                to_tick.ball_record.pos.x,
+                to_tick.ball_record.pos.y,
+                to_tick.ball_record.pos.z,
+                to_tick.ball_record.lin_vel.x,
+                to_tick.ball_record.lin_vel.y,
+                to_tick.ball_record.lin_vel.z,
+            );
+            if i == center {
+                print_center_snapshot(
+                    &recording.name,
+                    &[],
+                    ball_state,
+                    to_tick,
+                    entity,
+                    num_cars,
+                );
+            }
+            continue;
+        }
+
         // Focused entity's physics deltas.
         let focus_car = entity.min(num_cars.saturating_sub(1));
         let cs: CarState = *arena.get_car_state(car_idcs[focus_car]);
@@ -151,6 +197,38 @@ pub fn dump_window(recording: &Recording, cfg: &HarnessConfig, center: usize, en
             bool_pair(cs.is_flipping, real.is_flipping),
             bool_pair(cs.is_boosting, real.is_boosting),
             fmt_controls(&controls_buf[focus_car]),
+        );
+        let wcn = cs
+            .world_contact_normal
+            .map(|n| format!("wcn=({:.2},{:.2},{:.2})", n.x, n.y, n.z))
+            .unwrap_or_else(|| "wcn=none".into());
+        let nw = arena
+            .get_car_state(car_idcs[focus_car])
+            .num_wheels_in_contact();
+        println!(
+            "[{}] DIVE        {} nwheels={} from_pos=({:.1},{:.1},{:.1})",
+            recording.name,
+            wcn,
+            nw,
+            from_car.phys.pos.x,
+            from_car.phys.pos.y,
+            from_car.phys.pos.z
+        );
+        println!(
+            "[{}] DIVE        SIM  pos=({:.2},{:.2},{:.2}) vel=({:.1},{:.1},{:.1}) | REAL pos=({:.2},{:.2},{:.2}) vel=({:.1},{:.1},{:.1})",
+            recording.name,
+            cs.phys.pos.x,
+            cs.phys.pos.y,
+            cs.phys.pos.z,
+            cs.phys.vel.x,
+            cs.phys.vel.y,
+            cs.phys.vel.z,
+            real.phys.pos.x,
+            real.phys.pos.y,
+            real.phys.pos.z,
+            real.phys.lin_vel.x,
+            real.phys.lin_vel.y,
+            real.phys.lin_vel.z,
         );
 
         // Situation context line (from-state regime) for the focused car.

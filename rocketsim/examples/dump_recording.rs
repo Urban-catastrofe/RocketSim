@@ -82,6 +82,20 @@ struct CarRecord {
     demo_respawn_timer: f32,
     air_time: f32,
     air_time_since_jump: f32,
+    hit: HitRecord,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+struct HitRecord {
+    has_hit: bool,
+    _pad: [u8; 3],
+    ball_vel_before: VecRecord,
+    car_vel_before: VecRecord,
+    hit_normal: VecRecord,
+    hit_location: VecRecord,
+    rel_vel_mag: f32,
+    closing_speed: f32,
 }
 
 #[repr(C)]
@@ -140,17 +154,31 @@ fn main() {
         }
         let _ball: PhysRecord = unsafe { read_struct(&mut c) };
         if i >= start && i < end {
+            if i % 2 == 0 {
+                let bp = _ball.pos;
+                let bv = _ball.lin_vel;
+                println!("t={i:5} BALL pos=({:7.1},{:7.1},{:5.1}) vel=({:7.1},{:7.1},{:5.1})", bp.x, bp.y, bp.z, bv.x, bv.y, bv.z);
+            }
             for (j, cr) in cars.iter().enumerate() {
                 let p = cr.phys.pos;
                 let v = cr.phys.lin_vel;
                 println!(
-                    "t={i:5} c{j}: pos=({:7.1},{:7.1},{:5.1}) vel=({:7.1},{:7.1},{:5.1}) g={} j={} jt={:.4} hj={} df={} ctrl_jump={} boost={}",
+                    "t={i:5} c{j}: pos=({:7.1},{:7.1},{:5.1}) vel=({:7.1},{:7.1},{:5.1}) av=({:5.2},{:5.2},{:5.2}) upz={:.3} g={} j={} jt={:.4} hj={} df={} flip={} ft={:.4} frt=({:.2},{:.2},{:.2}) atj={:.4} at={:.4} ctrl_jump={} boost={}",
                     p.x, p.y, p.z, v.x, v.y, v.z,
+                    cr.phys.ang_vel.x, cr.phys.ang_vel.y, cr.phys.ang_vel.z,
+                    cr.phys.rot.rows[2].z,
                     cr.is_on_ground as u8,
                     cr.is_jumping as u8,
                     cr.jump_time,
                     cr.has_jumped as u8,
                     cr.double_jumped_or_flipped as u8,
+                    cr.is_flipping as u8,
+                    cr.flip_time,
+                    cr.flip_rel_torque.x,
+                    cr.flip_rel_torque.y,
+                    cr.flip_rel_torque.z,
+                    cr.air_time_since_jump,
+                    cr.air_time,
                     cr.prev_controls.jump as u8,
                     cr.boost_amount,
                 );
