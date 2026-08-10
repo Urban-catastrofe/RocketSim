@@ -72,10 +72,44 @@ fn flag_value(flag: StateFlag, pred: &CarState, real: &CarRecord) -> (bool, bool
     }
 }
 
+/// Running absolute-error stats for a float timer (air_time, jump_time).
+#[derive(Debug, Clone, Default)]
+pub struct TimerStats {
+    pub count: u64,
+    pub sum_abs: f64,
+    pub max: f32,
+}
+
+impl TimerStats {
+    fn add(&mut self, err: f32) {
+        self.count += 1;
+        self.sum_abs += err.abs() as f64;
+        self.max = self.max.max(err.abs());
+    }
+
+    pub fn mean(&self) -> f64 {
+        if self.count == 0 {
+            0.0
+        } else {
+            self.sum_abs / self.count as f64
+        }
+    }
+
+    fn merge(&mut self, other: TimerStats) {
+        self.count += other.count;
+        self.sum_abs += other.sum_abs;
+        self.max = self.max.max(other.max);
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct StateStats {
     pub total: u64,
     pub mismatches: [u64; StateFlag::ALL.len()],
+    /// air_time error, counted while either side is airborne.
+    pub air_time_err: TimerStats,
+    /// jump_time error, counted while either side is in the jump phase.
+    pub jump_time_err: TimerStats,
 }
 
 impl StateStats {
@@ -86,6 +120,12 @@ impl StateStats {
             if p != r {
                 self.mismatches[i] += 1;
             }
+        }
+        if !pred.is_on_ground || !real.is_on_ground {
+            self.air_time_err.add(pred.air_time - real.air_time);
+        }
+        if pred.is_jumping || real.is_jumping {
+            self.jump_time_err.add(pred.jump_time - real.jump_time);
         }
     }
 
@@ -103,5 +143,7 @@ impl StateStats {
         for i in 0..self.mismatches.len() {
             self.mismatches[i] += other.mismatches[i];
         }
+        self.air_time_err.merge(other.air_time_err);
+        self.jump_time_err.merge(other.jump_time_err);
     }
 }

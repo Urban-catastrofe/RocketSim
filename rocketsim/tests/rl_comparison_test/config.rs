@@ -11,6 +11,7 @@
 //! | `RLTICK`         | deep-dive a specific tick instead of the worst             | worst   |
 //! | `RLSEG`          | `1` to print per-segment (situation) breakdowns            | off     |
 //! | `RLGATE`         | `strict` \| `off` — enforce the physics gate               | `strict`|
+//! | `RLDIRECT`       | `1` to diff Rust vs C++ output field-by-field directly     | off     |
 //! | `RL_*_TOL`       | tolerance overrides (see [`PhysicsTolerance`])             | —       |
 
 use super::tolerance::{PhysicsTolerance, env_usize};
@@ -55,6 +56,10 @@ pub struct HarnessConfig {
     /// `rocketsim_rs` bindings) and report its accuracy side-by-side.
     /// Requires building with `--features cpp-compare`.
     pub cpp_compare: bool,
+    /// Also diff the Rust sim's output against the C++ sim's output directly,
+    /// field by field, after an identical restore+step (`RLDIRECT=1`).
+    /// Implies `cpp_compare`. Requires `--features cpp-compare`.
+    pub direct_compare: bool,
     /// Rollout mode: restore the recorded state at sampled start ticks, then
     /// free-run this many ticks with recorded controls and measure how the
     /// error compounds (0 = off). `RLROLL=1s`/`2s` or a tick count.
@@ -77,6 +82,7 @@ impl Default for HarnessConfig {
             threads: default_threads(),
             continuous: false,
             cpp_compare: false,
+            direct_compare: false,
             rollout_ticks: 0,
             rollout_stride: 120,
         }
@@ -151,6 +157,14 @@ impl HarnessConfig {
             std::env::var("RLCPP").as_deref(),
             Ok("1") | Ok("true") | Ok("always")
         );
+
+        cfg.direct_compare = matches!(
+            std::env::var("RLDIRECT").as_deref(),
+            Ok("1") | Ok("true") | Ok("always")
+        );
+        if cfg.direct_compare {
+            cfg.cpp_compare = true;
+        }
 
         cfg.rollout_ticks = parse_rollout_ticks();
         if let Ok(s) = env_usize("RLROLL_STRIDE") {

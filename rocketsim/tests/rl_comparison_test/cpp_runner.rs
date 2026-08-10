@@ -93,11 +93,26 @@ fn make_cpp_arena(num_cars: usize) -> (UniquePtr<Arena>, Vec<u32>) {
 /// C++-side twin of [`super::runner::set_state_to_record_tick`]: restore the
 /// full recorded state (including the same RLPR observer fixups) so each tick
 /// is measured in isolation.
+///
+/// With `rust_aligned` the jump-time observer fixup mirrors the Rust runner's
+/// velocity-conditional version exactly (needed by the direct sim-vs-sim pass
+/// so both sims start from an identical state); the standalone C++ passes keep
+/// the historical unconditional fixup.
 fn set_cpp_state_to_record_tick(
     arena: &mut UniquePtr<Arena>,
     car_ids: &[u32],
     tick: &TickRecord,
     step_controls: &[CarControls],
+) {
+    set_cpp_state_to_record_tick_impl(arena, car_ids, tick, step_controls, false)
+}
+
+fn set_cpp_state_to_record_tick_impl(
+    arena: &mut UniquePtr<Arena>,
+    car_ids: &[u32],
+    tick: &TickRecord,
+    step_controls: &[CarControls],
+    rust_aligned: bool,
 ) {
     for (i, &car_id) in car_ids.iter().enumerate() {
         let rec = &tick.car_records[i];
@@ -183,8 +198,15 @@ fn set_cpp_state_to_record_tick(
 
         // The observer reports is_jumping=true + jump_time=0 on the tick where
         // the impulse has already been applied; advance jump_time so it is not
-        // re-applied.
-        if cs.is_jumping && cs.jump_time == 0.0 {
+        // re-applied. The rust-aligned variant mirrors the Rust runner's
+        // velocity condition (a still-grounded vz means the impulse must still
+        // be applied this tick).
+        let jump_fixup = if rust_aligned {
+            cs.is_jumping && cs.jump_time == 0.0 && cs.vel.z > 100.0
+        } else {
+            cs.is_jumping && cs.jump_time == 0.0
+        };
+        if jump_fixup {
             cs.jump_time = rocketsim::consts::TICK_TIME;
         }
 
@@ -292,8 +314,10 @@ fn assert_finite_delta(delta: &PhysicsDelta, entity: &str, tick: usize) {
     }
 }
 
-/// Proxy carrying only the state-machine flags, for the shared state channel.
-fn flag_proxy(cs: &CarState) -> rocketsim::CarState {    rocketsim::CarState {
+/// Proxy carrying only the state-machine flags + timers, for the shared state
+/// channel.
+fn flag_proxy(cs: &CarState) -> rocketsim::CarState {
+    rocketsim::CarState {
         is_on_ground: cs.is_on_ground,
         is_jumping: cs.is_jumping,
         has_jumped: cs.has_jumped,
@@ -303,6 +327,8 @@ fn flag_proxy(cs: &CarState) -> rocketsim::CarState {    rocketsim::CarState {
         is_boosting: cs.is_boosting,
         is_supersonic: cs.is_supersonic,
         is_demoed: cs.is_demoed,
+        jump_time: cs.jump_time,
+        air_time: cs.air_time,
         ..Default::default()
     }
 }
@@ -461,6 +487,8 @@ pub fn run_cpp_rollout(recording: &Recording, cfg: &HarnessConfig) -> RolloutRep
                     fr.per_step[k - 1].add(s.mag, s.signed, i);
                     last_mag[j][super::measure::field_index(field)] = s.mag;
                 }
+                let proxy = flag_proxy(&cs);
+                ent.state.record(&proxy, real);
             }
 
             if !runner::is_ball_sentinel(&to_tick.ball_record) {
@@ -647,6 +675,455 @@ pub fn comparison_lines(ours: &mut Report, cpp: &mut Report, cfg: &HarnessConfig
     ))
     .chain(rows.into_iter().map(|(_, line)| format!("[{}] {}", ours.name, line)))
     .collect()
+}
+
+// ── Direct sim-vs-sim comparison ──
+//
+// The per-tick and rollout passes score each sim against the Rocket League
+// recording and compare the scores. That is indirect: two sims can miss RL in
+// different ways yet look "similar". The direct pass restores the *identical*
+// recorded state into both sims, steps both once, and diffs every CarState
+// field ours-vs-cpp — the true port-equivalence check.
+
+/// Vector fields diffed directly (magnitude of the per-tick difference).
+const DIRECT_VEC: &[&str] = &[
+    "pos",
+    "vel",
+    "ang_vel",
+    "rot_fwd",
+    "rot_right",
+    "rot_up",
+    "flip_rel_torque",
+    "world_normal",
+];
+/// Scalar fields diffed directly. `supersonic_timer` compares Rust's
+/// `supersonic_grace_timer` against C++'s `supersonic_time` (both count the
+/// supersonic-maintain window; the names differ).
+const DIRECT_FLOAT: &[&str] = &[
+    "jump_time",
+    "flip_time",
+    "air_time",
+    "air_time_since_jump",
+    "boost",
+    "handbrake_val",
+    "boosting_time",
+    "time_since_boosted",
+    "auto_flip_timer",
+    "auto_flip_torque_scale",
+    "demo_respawn_timer",
+    "bump_cooldown",
+    "supersonic_timer",
+];
+/// Flag fields diffed directly (mismatch counts). `wheels` counts per-wheel
+/// mismatches (4 per tick); `world_has_contact` compares Rust's
+/// `world_contact_normal.is_some()` against C++'s `world_contact.has_contact`.
+const DIRECT_BOOL: &[&str] = &[
+    "is_on_ground",
+    "has_jumped",
+    "has_double_jumped",
+    "has_flipped",
+    "is_flipping",
+    "is_jumping",
+    "is_boosting",
+    "is_supersonic",
+    "is_demoed",
+    "is_auto_flipping",
+    "wheels",
+    "world_has_contact",
+];
+
+#[derive(Debug, Clone, Copy, Default)]
+struct DirectAcc {
+    count: u64,
+    sum: f64,
+    max: f32,
+}
+
+impl DirectAcc {
+    fn add(&mut self, v: f32) {
+        self.count += 1;
+        self.sum += v.abs() as f64;
+        self.max = self.max.max(v.abs());
+    }
+
+    fn mean(&self) -> f64 {
+        if self.count == 0 {
+            0.0
+        } else {
+            self.sum / self.count as f64
+        }
+    }
+
+    fn merge(&mut self, other: Self) {
+        self.count += other.count;
+        self.sum += other.sum;
+        self.max = self.max.max(other.max);
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct DirectBoolAcc {
+    total: u64,
+    mismatches: u64,
+}
+
+impl DirectBoolAcc {
+    fn add(&mut self, o: bool, c: bool) {
+        self.total += 1;
+        if o != c {
+            self.mismatches += 1;
+        }
+    }
+
+    fn merge(&mut self, other: Self) {
+        self.total += other.total;
+        self.mismatches += other.mismatches;
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DirectEntity {
+    pub label: String,
+    pub is_car: bool,
+    pub vecs: Vec<DirectAcc>,
+    pub floats: Vec<DirectAcc>,
+    pub bools: Vec<DirectBoolAcc>,
+}
+
+impl DirectEntity {
+    fn new(label: String, is_car: bool) -> Self {
+        Self {
+            label,
+            is_car,
+            vecs: vec![DirectAcc::default(); DIRECT_VEC.len()],
+            floats: vec![DirectAcc::default(); DIRECT_FLOAT.len()],
+            bools: vec![DirectBoolAcc::default(); DIRECT_BOOL.len()],
+        }
+    }
+
+    fn merge(&mut self, other: DirectEntity) {
+        for (mine, theirs) in self.vecs.iter_mut().zip(other.vecs) {
+            mine.merge(theirs);
+        }
+        for (mine, theirs) in self.floats.iter_mut().zip(other.floats) {
+            mine.merge(theirs);
+        }
+        for (mine, theirs) in self.bools.iter_mut().zip(other.bools) {
+            mine.merge(theirs);
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DirectReport {
+    pub name: String,
+    pub num_cars: usize,
+    pub ticks_measured: u64,
+    pub entities: Vec<DirectEntity>,
+}
+
+impl DirectReport {
+    fn new(name: String, num_cars: usize) -> Self {
+        let mut entities = Vec::with_capacity(num_cars + 1);
+        for i in 0..num_cars {
+            entities.push(DirectEntity::new(format!("car_{i}"), true));
+        }
+        entities.push(DirectEntity::new("ball".to_string(), false));
+        Self {
+            name,
+            num_cars,
+            ticks_measured: 0,
+            entities,
+        }
+    }
+}
+
+fn record_direct_car(ent: &mut DirectEntity, o: &rocketsim::CarState, c: &CarState) {
+    let d = |a: Vec3A, b: Vec3| (a - vec3a(b)).length();
+    ent.vecs[0].add(d(o.phys.pos, c.pos));
+    ent.vecs[1].add(d(o.phys.vel, c.vel));
+    ent.vecs[2].add(d(o.phys.ang_vel, c.ang_vel));
+    ent.vecs[3].add(d(o.phys.rot_mat.col(0), c.rot_mat.forward));
+    ent.vecs[4].add(d(o.phys.rot_mat.col(1), c.rot_mat.right));
+    ent.vecs[5].add(d(o.phys.rot_mat.col(2), c.rot_mat.up));
+    ent.vecs[6].add(d(o.flip_rel_torque, c.flip_rel_torque));
+    match (o.world_contact_normal, c.world_contact.has_contact) {
+        (Some(n), true) => ent.vecs[7].add(d(n, c.world_contact.contact_normal)),
+        _ => {}
+    }
+
+    ent.floats[0].add(o.jump_time - c.jump_time);
+    ent.floats[1].add(o.flip_time - c.flip_time);
+    ent.floats[2].add(o.air_time - c.air_time);
+    ent.floats[3].add(o.air_time_since_jump - c.air_time_since_jump);
+    ent.floats[4].add(o.boost - c.boost);
+    ent.floats[5].add(o.handbrake_val - c.handbrake_val);
+    ent.floats[6].add(o.boosting_time - c.boosting_time);
+    ent.floats[7].add(o.time_since_boosted - c.time_since_boosted);
+    ent.floats[8].add(o.auto_flip_timer - c.auto_flip_timer);
+    ent.floats[9].add(o.auto_flip_torque_scale - c.auto_flip_torque_scale);
+    ent.floats[10].add(o.demo_respawn_timer - c.demo_respawn_timer);
+    ent.floats[11].add(o.bump_cooldown_timer - c.car_contact.cooldown_timer);
+    ent.floats[12].add(o.supersonic_grace_timer - c.supersonic_time);
+
+    ent.bools[0].add(o.is_on_ground, c.is_on_ground);
+    ent.bools[1].add(o.has_jumped, c.has_jumped);
+    ent.bools[2].add(o.has_double_jumped, c.has_double_jumped);
+    ent.bools[3].add(o.has_flipped, c.has_flipped);
+    ent.bools[4].add(o.is_flipping, c.is_flipping);
+    ent.bools[5].add(o.is_jumping, c.is_jumping);
+    ent.bools[6].add(o.is_boosting, c.is_boosting);
+    ent.bools[7].add(o.is_supersonic, c.is_supersonic);
+    ent.bools[8].add(o.is_demoed, c.is_demoed);
+    ent.bools[9].add(o.is_auto_flipping, c.is_auto_flipping);
+    let wheels = &mut ent.bools[10];
+    for k in 0..4 {
+        wheels.add(o.wheels_with_contact[k], c.wheels_with_contact[k]);
+    }
+    ent.bools[11].add(o.world_contact_normal.is_some(), c.world_contact.has_contact);
+}
+
+fn record_direct_ball(ent: &mut DirectEntity, o: &rocketsim::BallState, c: &BallState) {
+    let d = |a: Vec3A, b: Vec3| (a - vec3a(b)).length();
+    ent.vecs[0].add(d(o.phys.pos, c.pos));
+    ent.vecs[1].add(d(o.phys.vel, c.vel));
+    ent.vecs[2].add(d(o.phys.ang_vel, c.ang_vel));
+    ent.vecs[3].add(d(o.phys.rot_mat.col(0), c.rot_mat.forward));
+    ent.vecs[4].add(d(o.phys.rot_mat.col(1), c.rot_mat.right));
+    ent.vecs[5].add(d(o.phys.rot_mat.col(2), c.rot_mat.up));
+}
+
+/// Restore the identical recorded state into both sims, step both once, and
+/// diff every comparable output field directly (ours vs C++).
+///
+/// `RLDIRECT_TRACE=1` prints the jump/boost state-machine fields of car 0
+/// side by side for every tick — use it on a single case to localize a
+/// divergence.
+pub fn run_direct_compare(recording: &Recording, _cfg: &HarnessConfig) -> DirectReport {
+    init_cpp();
+    let trace = matches!(
+        std::env::var("RLDIRECT_TRACE").as_deref(),
+        Ok("1") | Ok("true")
+    );
+
+    let num_cars = recording.info.num_cars as usize;
+    let stride = recording.stride;
+    let n = runner::loop_bound(recording, None);
+    let starts: Vec<usize> = (0..=n).step_by(stride).collect();
+
+    let mut report = DirectReport::new(recording.name.clone(), num_cars);
+    if starts.is_empty() {
+        return report;
+    }
+
+    let (mut rust_arena, rust_idcs) = runner::make_arena(num_cars);
+    let (mut cpp_arena, cpp_ids) = make_cpp_arena(num_cars);
+    let mut rust_controls: Vec<rocketsim::CarControls> =
+        vec![rocketsim::CarControls::DEFAULT; num_cars];
+    let mut cpp_controls: Vec<CarControls> = vec![CarControls::default(); num_cars];
+    let mut warmup_left = runner::SHARD_WARMUP_TICKS;
+
+    for &i in &starts {
+        if runner::has_discontinuity(recording, i, stride) {
+            continue;
+        }
+
+        let from_tick = &recording.ticks[i];
+        let to_tick = &recording.ticks[i + stride];
+        for (j, car_record) in to_tick.car_records.iter().enumerate() {
+            rust_controls[j] = car_record.prev_controls.into();
+            cpp_controls[j] = controls(car_record.prev_controls);
+        }
+
+        runner::set_state_to_record_tick(&mut rust_arena, &rust_idcs, from_tick, &rust_controls);
+        // Align the Rust restore with the C++ one so both sims start from the
+        // exact same state: the C++ restore gives world contact back from the
+        // recording (the Rust runner clears it) and resets the bump cooldown.
+        for (j, &car_idx) in rust_idcs.iter().enumerate() {
+            let rec = &from_tick.car_records[j];
+            let mut cs = *rust_arena.get_car_state(car_idx);
+            cs.world_contact_normal = if rec.phys.has_world_contact {
+                Some(rec.phys.world_contact_normal.into())
+            } else {
+                None
+            };
+            cs.bump_cooldown_timer = 0.0;
+            rust_arena.set_car_state(car_idx, cs);
+        }
+        set_cpp_state_to_record_tick_impl(&mut cpp_arena, &cpp_ids, from_tick, &cpp_controls, true);
+
+        if trace {
+            let r0: rocketsim::CarState = *rust_arena.get_car_state(rust_idcs[0]);
+            let c0 = cpp_arena.pin_mut().get_car(cpp_ids[0]);
+            let rec = &from_tick.car_records[0];
+            println!(
+                "RESTORE t{:>4} | rec boost={:.4} ib={} ctrl_boost={} | ours boost={:.4} ib={} bt={:.4} | cpp boost={:.4} ib={} bt={:.4}",
+                i,
+                rec.boost_amount,
+                rec.is_boosting as u8,
+                rust_controls[0].boost as u8,
+                r0.boost,
+                r0.is_boosting as u8,
+                r0.boosting_time,
+                c0.boost,
+                c0.is_boosting as u8,
+                c0.boosting_time,
+            );
+        }
+
+        rust_arena.step_tick();
+        cpp_arena.pin_mut().step(1);
+
+        if warmup_left > 0 {
+            warmup_left -= 1;
+            continue;
+        }
+
+        for (j, &car_idx) in rust_idcs.iter().enumerate() {
+            let real = &to_tick.car_records[j];
+            if real.is_demoed || runner::is_car_sentinel(&real.phys) {
+                continue;
+            }
+            let o: rocketsim::CarState = *rust_arena.get_car_state(car_idx);
+            let c = cpp_arena.pin_mut().get_car(cpp_ids[j]);
+            record_direct_car(&mut report.entities[j], &o, &c);
+            if trace && j == 0 {
+                println!(
+                    "TRACE t{:>4} | rec from_boost={:.4} to_boost={:.4} to_ib={} \
+                     | jump  ours={} hj={} jt={:.4} | cpp={} hj={} jt={:.4} \
+                     | air ours={:.4} atsj={:.4} | cpp={:.4} atsj={:.4} \
+                     | boost ours={:.4} ib={} bt={:.4} | cpp={:.4} ib={} bt={:.4} \
+                     | ground ours={} cpp={}",
+                    i,
+                    from_tick.car_records[0].boost_amount,
+                    to_tick.car_records[0].boost_amount,
+                    to_tick.car_records[0].is_boosting as u8,
+                    o.is_jumping as u8,
+                    o.has_jumped as u8,
+                    o.jump_time,
+                    c.is_jumping as u8,
+                    c.has_jumped as u8,
+                    c.jump_time,
+                    o.air_time,
+                    o.air_time_since_jump,
+                    c.air_time,
+                    c.air_time_since_jump,
+                    o.boost,
+                    o.is_boosting as u8,
+                    o.boosting_time,
+                    c.boost,
+                    c.is_boosting as u8,
+                    c.boosting_time,
+                    o.is_on_ground as u8,
+                    c.is_on_ground as u8,
+                );
+            }
+        }
+
+        if !runner::is_ball_sentinel(&to_tick.ball_record) {
+            let o: rocketsim::BallState = *rust_arena.get_ball_state();
+            let c = cpp_arena.pin_mut().get_ball();
+            record_direct_ball(&mut report.entities[num_cars], &o, &c);
+        }
+
+        report.ticks_measured += 1;
+    }
+
+    report
+}
+
+/// Render the direct ours-vs-C++ table: nonzero deltas first, then the count
+/// of bit-exact fields.
+pub fn direct_lines(report: &DirectReport, cfg: &HarnessConfig) -> Vec<String> {
+    let mut lines = Vec::new();
+    lines.push(format!(
+        "==== DIRECT {} | ours vs C++ field-by-field after identical restore+step ({} ticks) ====",
+        report.name, report.ticks_measured,
+    ));
+
+    let focused: Vec<usize> = match cfg.car_focus {
+        Some(c) if c < report.num_cars => vec![c],
+        Some(_) => vec![],
+        None => (0..report.entities.len()).collect(),
+    };
+
+    for ei in focused {
+        let ent = &report.entities[ei];
+        let mut rows: Vec<(f32, String)> = Vec::new();
+        let mut exact = 0usize;
+        let mut total = 0usize;
+        for (fi, name) in DIRECT_VEC.iter().enumerate() {
+            let a = ent.vecs[fi];
+            if a.count == 0 || (!ent.is_car && fi > 5) {
+                continue;
+            }
+            total += 1;
+            if a.max == 0.0 {
+                exact += 1;
+            } else {
+                rows.push((
+                    a.max,
+                    format!("{:<18} mean={:.6} max={:.6} (n={})", name, a.mean(), a.max, a.count),
+                ));
+            }
+        }
+        if ent.is_car {
+            for (fi, name) in DIRECT_FLOAT.iter().enumerate() {
+                let a = ent.floats[fi];
+                if a.count == 0 {
+                    continue;
+                }
+                total += 1;
+                if a.max == 0.0 {
+                    exact += 1;
+                } else {
+                    rows.push((
+                        a.max,
+                        format!("{:<18} mean={:.6} max={:.6} (n={})", name, a.mean(), a.max, a.count),
+                    ));
+                }
+            }
+            for (bi, name) in DIRECT_BOOL.iter().enumerate() {
+                let b = ent.bools[bi];
+                if b.total == 0 {
+                    continue;
+                }
+                total += 1;
+                if b.mismatches == 0 {
+                    exact += 1;
+                } else {
+                    rows.push((
+                        b.mismatches as f32,
+                        format!(
+                            "{:<18} {}/{} mismatches ({:.2}%)",
+                            name,
+                            b.mismatches,
+                            b.total,
+                            b.mismatches as f64 / b.total as f64 * 100.0
+                        ),
+                    ));
+                }
+            }
+        }
+        rows.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+        lines.push(format!(
+            "[{}] DIRECT {:>7}: {}/{} fields bit-exact{}",
+            report.name,
+            ent.label,
+            exact,
+            total,
+            if rows.is_empty() {
+                " — IDENTICAL OUTPUT".to_string()
+            } else {
+                String::new()
+            },
+        ));
+        for (_, row) in rows {
+            lines.push(format!("[{}] DIRECT {:>7}  {}", report.name, ent.label, row));
+        }
+    }
+
+    lines
 }
 
 /// Consistency / outlier comparison.

@@ -105,11 +105,20 @@ fn test_recording(recording: &Recording) {
             for line in &cpp_lines {
                 println!("{line}");
             }
+            for line in report::state_lines(&cpp_report, &cpp_cfg) {
+                println!("{line}");
+            }
             for line in cpp_runner::comparison_lines(&mut report, &mut cpp_report, &cfg) {
                 println!("{line}");
             }
             for line in cpp_runner::tail_comparison_lines(&mut report, &mut cpp_report, &cfg) {
                 println!("{line}");
+            }
+            if cfg.direct_compare {
+                let direct = cpp_runner::run_direct_compare(recording, &cfg);
+                for line in cpp_runner::direct_lines(&direct, &cfg) {
+                    println!("{line}");
+                }
             }
         }
         #[cfg(not(feature = "cpp-compare"))]

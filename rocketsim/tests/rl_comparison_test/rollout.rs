@@ -19,6 +19,7 @@ use super::config::HarnessConfig;
 use super::measure::{compute_delta, field_index};
 use super::recording::Recording;
 use super::runner;
+use super::state::{StateFlag, StateStats};
 use super::stats::{Field, RunningStats};
 
 /// Per-field rollout stats: one [`RunningStats`] per rollout step, so the
@@ -58,6 +59,9 @@ pub struct RolloutEntityReport {
     pub label: String,
     pub is_car: bool,
     pub fields: Vec<RolloutFieldReport>,
+    /// State-flag mismatch + timer-error accumulation across all rollout steps
+    /// (cars only; the ball leaves it empty).
+    pub state: StateStats,
 }
 
 impl RolloutEntityReport {
@@ -66,6 +70,7 @@ impl RolloutEntityReport {
             label,
             is_car,
             fields: Field::ALL.iter().map(|_| RolloutFieldReport::new(rollout_ticks)).collect(),
+            state: StateStats::default(),
         }
     }
 
@@ -77,6 +82,7 @@ impl RolloutEntityReport {
         for (mine, theirs) in self.fields.iter_mut().zip(other.fields) {
             mine.merge(theirs);
         }
+        self.state.merge(other.state);
     }
 }
 
@@ -205,6 +211,7 @@ fn run_rollout_shard(recording: &Recording, shard: &[usize], cfg: &HarnessConfig
                     fr.per_step[k - 1].add(s.mag, s.signed, i);
                     last_mag[j][field_index(field)] = s.mag;
                 }
+                ent.state.record(&cs, real);
             }
 
             if !runner::is_ball_sentinel(&to_tick.ball_record) {
@@ -348,6 +355,51 @@ pub fn rollout_lines(report: &RolloutReport, cfg: &HarnessConfig) -> Vec<String>
                 fr.worst_end_mag,
                 fr.worst_end_start,
             ));
+        }
+        if ent.is_car && ent.state.total > 0 {
+            let mut rows: Vec<(f64, &str)> = StateFlag::ALL
+                .iter()
+                .map(|f| (ent.state.mismatch_rate(*f), f.label()))
+                .collect();
+            rows.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+            let nonzero: Vec<String> = rows
+                .iter()
+                .filter(|(r, _)| *r > 0.0)
+                .map(|(r, l)| format!("{l}={:.2}%", r * 100.0))
+                .collect();
+            let detail = if nonzero.is_empty() {
+                "all flags match".to_string()
+            } else {
+                nonzero.join(" ")
+            };
+            lines.push(format!(
+                "[{}] ROLLSTATE {:>7} (n={}): {}",
+                report.name, ent.label, ent.state.total, detail
+            ));
+            let st = &ent.state;
+            let mut timers = Vec::new();
+            if st.air_time_err.count > 0 {
+                timers.push(format!(
+                    "air_time mean={:.4}s max={:.4}s",
+                    st.air_time_err.mean(),
+                    st.air_time_err.max
+                ));
+            }
+            if st.jump_time_err.count > 0 {
+                timers.push(format!(
+                    "jump_time mean={:.4}s max={:.4}s",
+                    st.jump_time_err.mean(),
+                    st.jump_time_err.max
+                ));
+            }
+            if !timers.is_empty() {
+                lines.push(format!(
+                    "[{}] ROLLSTATE {:>7} timers: {}",
+                    report.name,
+                    ent.label,
+                    timers.join(" | ")
+                ));
+            }
         }
     }
 

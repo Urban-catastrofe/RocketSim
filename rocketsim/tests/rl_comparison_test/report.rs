@@ -338,6 +338,32 @@ pub fn state_lines(report: &Report, cfg: &HarnessConfig) -> Vec<String> {
             "[{}] STATE {:>7} (n={}): {}",
             report.name, ent.label, ent.state.total, detail
         ));
+        let st = &ent.state;
+        let mut timers = Vec::new();
+        if st.air_time_err.count > 0 {
+            timers.push(format!(
+                "air_time mean={:.4}s max={:.4}s (n={})",
+                st.air_time_err.mean(),
+                st.air_time_err.max,
+                st.air_time_err.count
+            ));
+        }
+        if st.jump_time_err.count > 0 {
+            timers.push(format!(
+                "jump_time mean={:.4}s max={:.4}s (n={})",
+                st.jump_time_err.mean(),
+                st.jump_time_err.max,
+                st.jump_time_err.count
+            ));
+        }
+        if !timers.is_empty() {
+            lines.push(format!(
+                "[{}] STATE {:>7} timers: {}",
+                report.name,
+                ent.label,
+                timers.join(" | ")
+            ));
+        }
     }
     lines
 }
