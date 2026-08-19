@@ -74,10 +74,20 @@ impl WheelInfo {
         self.wheels_radius = wheel_radius;
         self.suspension_force_scale = suspsension_force_scale;
 
+        // The ray has to span the whole suspension travel. C++ RocketSim
+        // shortens it by `SUSPENSION_SUBTRACTION`, which is expressed in BT
+        // units (0.05 BT = 2.5 UU) and so eats 2.5 of the 12 UU of travel:
+        // wheels there stop reporting contact while Rocket League still has
+        // them on the ground. Ground truth is unambiguous — across the
+        // recording suite RL holds wheel contact continuously up to a
+        // suspension length of 11.9999 out of `MAX_SUSPENSION_TRAVEL` = 12,
+        // with a flat sample distribution over 9.5..12.0 (13431 samples, 10390
+        // of them on the flat floor with `|normal.z| = 1`). The subtraction
+        // stays where it belongs, on the compression-side pushback threshold
+        // in `apply_ray_cast`.
         let suspension_travel = bullet_vehicle::MAX_SUSPENSION_TRAVEL * UU_TO_BT;
         self.real_ray_length =
-            self.suspension_rest_length_1 + suspension_travel + self.wheels_radius
-                - bullet_vehicle::SUSPENSION_SUBTRACTION;
+            self.suspension_rest_length_1 + suspension_travel + self.wheels_radius;
     }
 
     pub fn prepare_for_raycast(&mut self, chassis_trans: &Affine3A) -> (Vec3A, Vec3A) {

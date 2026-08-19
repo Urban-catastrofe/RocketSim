@@ -209,17 +209,61 @@ show is listed under Known Impulse Defects below.
    `car_sideflip_while_turning_left`: −70.4 vs −33.8). Consistent with the
    wheels unloading and breaking traction as the car leaves the ground, which
    ties into the slip-friction curve.
-3. **The sim sometimes flips where the game jumped.** 8 of 67 case-worst jump
-   windows show `sim |dv| ≈ 500` (`flip::INITIAL_VEL_SCALE`) against
-   `game |dv| ≈ 300`: the sim took the airborne dodge branch where RL took the
-   grounded jump branch. `car_mech_ceiling_fall_flip` is the clearest — the car
-   is upside-down on the ceiling (`up.z = −1`, all four wheels in contact) and
-   presses jump with pitch held; RL jumps, the sim dodges. Suspect
-   `is_on_ground` at the moment of the press for ceiling/wall contact and within
-   a tick of landing.
+3. ~~**The sim sometimes flips where the game jumped.**~~ **Fixed** — the wheel
+   raycast was 2.5 UU short, so `is_on_ground` went false early and the press
+   fell through to the airborne dodge branch. See *Suspension Travel Is The
+   Whole 12 UU* below. Jump-window mean case-worst error dropped 94.8 → 45.2
+   UU/s and `car_mech_ceiling_fall_flip` went 590.1 → 3.77.
 4. **Sideflip direction is slightly off.** `car_sideflip_while_turning_left`
    matches in magnitude (game 521.0, sim 520.0) but not direction (game
    `(−272.8,−443.8)`, sim `(−263.0,−448.4)`), for 10.8 UU/s of error.
+
+### Suspension Travel Is The Whole 12 UU
+
+The wheel suspension raycast has to span the full `MAX_SUSPENSION_TRAVEL`. C++
+RocketSim shortens it by `SUSPENSION_SUBTRACTION`, which is written in BT units
+(0.05 BT = 2.5 UU) and therefore eats 2.5 of the 12 UU of travel; the Rust port
+copied it faithfully. Wheels in that last 2.5 UU stopped reporting contact while
+Rocket League still had them on the ground.
+
+The recordings settle it. `WheelRecord::susp_length` maps exactly onto the sim's
+`suspension_length - suspension_rest_length_1` — confirmed geometrically on
+`car_mech_ceiling_fall_flip`, where both place the ceiling surface at z ≈ 2048.0
+and the logged value tracks position one tick behind (`d(susp)[i] = -d(z)[i-1]`
+to four decimals). Against that mapping:
+
+- RL holds wheel contact continuously up to `susp_length` = **11.9999** out of
+  12, with a flat sample distribution across 9.5..12.0 — no cutoff at the sim's
+  9.5.
+- 874371 of the no-contact samples read exactly **12.0**, matching the
+  fully-extended value the no-contact branch assigns.
+- 13431 in-contact samples sit beyond the sim's old 9.5 limit. 10390 of them are
+  on the **flat floor** (`|normal.z| = 1`) and 7496 have all four wheels down —
+  this is the suspension-extension phase of every jump and every landing, not a
+  ceiling curiosity.
+
+Removing the subtraction from the ray (it stays on the compression-side
+`ray_pushback_thresh`, which ground truth says nothing about) improved 38 of 313
+case/car velocity rows against 26 regressions, and mean `car.vel` p100 fell
+318.99 → 313.64. Two regressions are real rather than fourth-decimal noise, and
+both expose defects the fix uncovered rather than causing:
+
+- `car_boost_then_jump` 6.59 → 14.37 UU/s. The sim's `is_on_ground` is now
+  *correct* on the offending tick (that mismatch disappeared from the STATE
+  line), which means engine force now runs through wheels carrying almost no
+  suspension load. Our wheel friction and engine force do not scale with load at
+  all. The recordings cannot arbitrate this: `lat_friction`, `long_friction` and
+  `engine_force` are identically zero in every `WheelRecord` — the observer
+  never populates them.
+- `car_ball_ball_hits_tumbling_car` 127.8 → 181.3 UU/s, same tick (t=136),
+  `over%` unchanged. A car falls onto the ball at 838 UU/s; the longer ray
+  catches the ball one tick earlier and runs suspension against it. The sim
+  already over-absorbed that impact by 128 UU/s, so this is an existing
+  wheel-versus-dynamic-body defect being amplified, not a new one.
+
+One more mapping note for future work: recorded `susp_length` runs as low as
+−23, so RL does **not** clamp compression at `rest1 - MAX_SUSPENSION_TRAVEL`
+the way `apply_ray_cast` does. About 1.2% of in-contact samples are below −12.
 
 Double jumps are effectively **uncovered**: an airborne jump press with any stick
 input is a flip, so almost every airborne onset classifies as one, and the
