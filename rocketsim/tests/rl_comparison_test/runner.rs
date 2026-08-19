@@ -315,6 +315,15 @@ fn run_per_tick_shard(recording: &Recording, shard: &[usize]) -> Report {
             if real.is_demoed || is_car_sentinel(&real.phys) {
                 continue;
             }
+            // A step straddling a jump/flip press carries an arbitrary share of
+            // the impulse, set by a sub-frame phase the recording never stored,
+            // so a single-step comparison here measures the phase and not the
+            // physics. The impulse itself is still gated, over the two-step
+            // window where that phase cancels (see `impulse_window.rs`).
+            if recording.step_straddles_impulse(i, stride, j) {
+                report.impulse_steps_skipped += 1;
+                continue;
+            }
             let cs: CarState = *arena.get_car_state(car_idx);
             let from_car = &from_tick.car_records[j];
             let delta = compute_delta(&cs.phys, &real.phys);

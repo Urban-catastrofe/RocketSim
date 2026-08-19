@@ -29,6 +29,17 @@ pub struct PhysicsTolerance {
     /// Percentile used for gating (0..=1). `1.0` gates on the **worst single
     /// step** — no spike is tolerated. Lower it to tolerate rare outliers.
     pub percentile: f32,
+    /// Velocity error budget in UU/s for a button-triggered impulse, measured
+    /// across the two-step window that brackets the press.
+    ///
+    /// Separate from [`Self::vel`] because it is a different measurement, not a
+    /// looser one: the two steps either side of a jump/flip press carry an
+    /// arbitrary share of the impulse set by a sub-frame phase the recording
+    /// does not store, so only their *sum* is defined (see `impulse_window.rs`).
+    /// The
+    /// budget covers one whole impulse plus two steps of ordinary integration
+    /// error, so it is wider than the per-step bar by roughly those two steps.
+    pub impulse_vel: f32,
 }
 
 impl Default for PhysicsTolerance {
@@ -42,6 +53,7 @@ impl Default for PhysicsTolerance {
             rot: 0.02,
             // Gate on the maximum, not a percentile: one bad step is a failure.
             percentile: 1.0,
+            impulse_vel: 0.1,
         }
     }
 }
@@ -63,6 +75,9 @@ impl PhysicsTolerance {
         }
         if let Ok(v) = env_f32("RL_PERCENTILE") {
             self.percentile = v.clamp(0.0, 1.0);
+        }
+        if let Ok(v) = env_f32("RL_IMPULSE_TOL") {
+            self.impulse_vel = v;
         }
         self
     }

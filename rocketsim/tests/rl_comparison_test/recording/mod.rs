@@ -23,6 +23,31 @@ pub struct Recording {
     pub info: RecordingInfo,
     pub ticks: Vec<TickRecord>,
     pub stride: usize,
+    /// Per `[tick][car]`: this tick begins a button-triggered impulse (jump,
+    /// double jump or flip). Such a tick and the one before it straddle an
+    /// unrecorded sub-frame press phase, so neither step is reproducible — see
+    /// [`normalize::detect_impulse_onsets`]. Kept in step with `ticks` by
+    /// `car_order::reorder_cars`, which permutes both.
+    pub impulse_onsets: Vec<Vec<bool>>,
+}
+
+impl Recording {
+    /// True if car `car` starts an impulse on `tick`.
+    pub fn is_impulse_onset(&self, tick: usize, car: usize) -> bool {
+        self.impulse_onsets
+            .get(tick)
+            .and_then(|row| row.get(car))
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// True if the step `tick -> tick + stride` straddles an impulse press for
+    /// car `car`. The press sits between the two recorded frames either side of
+    /// an onset tick, so both the step into the onset and the step out of it
+    /// carry an arbitrary share of the impulse.
+    pub fn step_straddles_impulse(&self, tick: usize, stride: usize, car: usize) -> bool {
+        self.is_impulse_onset(tick, car) || self.is_impulse_onset(tick + stride, car)
+    }
 }
 
 impl Recording {
@@ -95,6 +120,10 @@ impl Recording {
             ));
         }
 
+        // Mark impulse onsets from the *raw* pulses first: normalising clears
+        // the airborne double-jump pulses, which are onsets all the same.
+        let impulse_onsets = normalize::detect_impulse_onsets(&ticks, num_cars);
+
         // Bring the observer's state-machine flags onto the sim's semantics
         // before anything measures against them (see `normalize`).
         normalize::normalize_jump_active(&mut ticks, num_cars);
@@ -116,6 +145,7 @@ impl Recording {
             info,
             ticks,
             stride,
+            impulse_onsets,
         })
     }
 

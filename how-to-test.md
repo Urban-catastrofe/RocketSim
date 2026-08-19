@@ -166,14 +166,65 @@ recorded tick (uniform dt, no dropped frames) and each tick is self-consistent
 of 291.67 UU/s. Same story for flips: `car_sideflip_while_turning_left` splits
 one 521 UU/s dodge impulse 14%/86% across ticks 23 and 24.
 
-Consequence: **the two onset ticks of every jump, double jump and flip can never
-pass a 0.03 UU/s per-tick gate**, no matter how correct the physics is. The sim
-fires the whole impulse on the tick where the rising edge appears; the recording
-spread it over two. This is now the binding constraint on the pass count — the
-interior ticks of jumps are already at 0.05 UU/s. Measuring impulse physics
-honestly needs a two-tick window comparison (where φ cancels) rather than a
-per-tick one; until that exists, treat onset-tick errors as unmeasured rather
-than as physics defects.
+Consequence: **the two steps straddling every jump, double jump and flip press
+can never pass a 0.03 UU/s per-tick gate**, no matter how correct the physics is.
+The sim fires the whole impulse on the step where the rising edge appears; the
+recording spread it over two.
+
+The harness therefore splits the measurement in two:
+
+- The **per-tick pass skips those two steps** (per car), counting them as
+  `impulse_steps_skipped=N` on the report header so the blind spot is visible
+  rather than silent. `recording/normalize.rs::detect_impulse_onsets` marks the
+  onsets from the observer's `is_jumping` / `is_flipping` pulses.
+- **`impulse_window.rs` gates the impulse over the two-step window** `onset−1 →
+  onset+1`, where φ divides out because the sum across the pair is one whole
+  impulse regardless of how it was split. The sim is restored once, at
+  `onset−1`, then free-runs both steps on the recorded controls — restoring in
+  between would re-impose the recording's arbitrary split. Budget:
+  `RL_IMPULSE_TOL` (default 0.1 UU/s, wider than the per-step bar by roughly the
+  two steps of ordinary integration error it contains).
+
+Report lines look like:
+
+```
+[case] IMPULSE jump        n=  1 mean= 25.8668 max= 25.8668@t20 over=1/1 budget=0.100
+[case] IMPULSE   worst car0 jump @t20: game dv=(+4.4,-50.9,+299.7) |304.1|                  sim dv=(+6.4,-26.5,+307.8) |309.0| vel_err=25.8668 pos_err=0.1421
+```
+
+This immediately settles what the per-tick numbers could not: the **flip impulse
+is essentially exact** (`car_diag_flip_drive` reads 0.0020 UU/s on a ~500 UU/s
+dodge; flip windows have a median of 1.2 UU/s), so the 300–450 UU/s "flip
+defect" the per-tick gate used to report was entirely φ. What the window does
+show is listed under Known Impulse Defects below.
+
+### Known Impulse Defects
+
+1. **Grounded jump reads ~10 UU/s too much vertical velocity.** Every jump
+   window overshoots: game `dv.z` 296.4–299.7 against the sim's 307.8–307.9,
+   consistently. Median jump-window error 12.75 UU/s.
+2. **Lateral speed is not shed during jump-off while turning.** A turning car
+   loses far more sideways velocity than the sim allows
+   (`car_jump_after_turning_left`: game `dv.y` −50.9, sim −26.5;
+   `car_sideflip_while_turning_left`: −70.4 vs −33.8). Consistent with the
+   wheels unloading and breaking traction as the car leaves the ground, which
+   ties into the slip-friction curve.
+3. **The sim sometimes flips where the game jumped.** 8 of 67 case-worst jump
+   windows show `sim |dv| ≈ 500` (`flip::INITIAL_VEL_SCALE`) against
+   `game |dv| ≈ 300`: the sim took the airborne dodge branch where RL took the
+   grounded jump branch. `car_mech_ceiling_fall_flip` is the clearest — the car
+   is upside-down on the ceiling (`up.z = −1`, all four wheels in contact) and
+   presses jump with pitch held; RL jumps, the sim dodges. Suspect
+   `is_on_ground` at the moment of the press for ceiling/wall contact and within
+   a tick of landing.
+4. **Sideflip direction is slightly off.** `car_sideflip_while_turning_left`
+   matches in magnitude (game 521.0, sim 520.0) but not direction (game
+   `(−272.8,−443.8)`, sim `(−263.0,−448.4)`), for 10.8 UU/s of error.
+
+Double jumps are effectively **uncovered**: an airborne jump press with any stick
+input is a flip, so almost every airborne onset classifies as one, and the
+`car_double_jump_*` recordings put their second jump outside the measurable
+window. Re-record if double-jump accuracy matters.
 
 ## The Accuracy Bar
 
@@ -478,6 +529,7 @@ rocketsim/tests/
     config.rs                     → env-var knobs (RLDEEP, RLCAR, RLTICK, …)
     tolerance.rs                  → per-field physics budgets
     validate.rs                   → ground-truth validity checks
+    impulse_window.rs             → two-step jump/flip impulse windows
     recording/normalize.rs        → observer-semantics → sim-semantics
     stats.rs                      → Field/Segment vocab + running/percentile stats
     measure.rs                    → lean per-tick deltas (hot path, no alloc)

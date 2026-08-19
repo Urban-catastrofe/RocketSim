@@ -95,6 +95,11 @@ pub struct Report {
     /// Ticks skipped because the recording has a non-physical discontinuity
     /// (goal reset, demo, logger car-index swap).
     pub ticks_voided: u64,
+    /// Per-car steps skipped because they straddle a button-triggered impulse
+    /// press, whose sub-frame phase the recording does not capture. Counted
+    /// rather than silently dropped: these are the only steps the per-tick bar
+    /// cannot judge, and their number is the size of that blind spot.
+    pub impulse_steps_skipped: u64,
     pub num_cars: usize,
     /// Cars first (0..num_cars), then the ball at index num_cars.
     pub entities: Vec<EntityReport>,
@@ -112,6 +117,7 @@ impl Report {
             stride,
             ticks_measured: 0,
             ticks_voided: 0,
+            impulse_steps_skipped: 0,
             num_cars,
             entities,
         }
@@ -137,6 +143,7 @@ impl Report {
     pub fn merge(&mut self, other: Report) {
         self.ticks_measured += other.ticks_measured;
         self.ticks_voided += other.ticks_voided;
+        self.impulse_steps_skipped += other.impulse_steps_skipped;
         for (mine, theirs) in self.entities.iter_mut().zip(other.entities.into_iter()) {
             mine.merge(theirs);
         }
@@ -175,13 +182,19 @@ pub fn evaluate(report: &mut Report, cfg: &HarnessConfig) -> (GateOutcome, Vec<S
 
     let gate_strict = cfg.gate == GateMode::Strict;
     let gate_label = if gate_strict { "STRICT" } else { "OFF" };
+    let impulse_note = if report.impulse_steps_skipped > 0 {
+        format!(" impulse_steps_skipped={}", report.impulse_steps_skipped)
+    } else {
+        String::new()
+    };
     lines.push(format!(
-        "==== RLPR {} | ticks={} stride={} gate={} percentile=p{:0>2} ====",
+        "==== RLPR {} | ticks={} stride={} gate={} percentile=p{:0>2}{} ====",
         report.name,
         report.ticks_measured,
         report.stride,
         gate_label,
         (tol.percentile * 100.0) as i32,
+        impulse_note,
     ));
 
     // A case that compared nothing proves nothing: every field reports 0.0 and

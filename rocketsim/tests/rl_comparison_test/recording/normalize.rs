@@ -11,6 +11,43 @@ use rocketsim::consts::car::jump;
 
 use super::tick_record::TickRecord;
 
+/// Mark, per `[tick][car]`, the ticks on which Rocket League *began* applying a
+/// button-triggered impulse: a jump, a double jump or a flip.
+///
+/// Such an impulse is applied at the moment of the press, which is not aligned
+/// to the 120 Hz physics grid. The press lands at some sub-frame phase φ and the
+/// impulse is split across the two recorded frames that straddle it, in
+/// proportion (1−φ):φ. φ is not recorded anywhere, so neither of those two
+/// frames can be reproduced from a frame-aligned restore — the sim applies the
+/// whole impulse on whichever step carries the control's rising edge. Only the
+/// *total* across the pair is well defined, and it is exact: every jump onset
+/// sums to `jump::IMMEDIATE_FORCE` = 291.67 UU/s however φ falls, while the
+/// single-frame share ranges from 15.2 to 295.6 UU/s across recordings of the
+/// identical mechanic.
+///
+/// Both the observer's `is_jumping` and `is_flipping` are one-tick pulses on the
+/// activation tick (1626 and 1314 events in the suite, every run length exactly
+/// 1), which is precisely the marker needed. They coincide on 65 ticks, where
+/// one event is simply marked once.
+///
+/// Must run on the **raw** records, before [`normalize_jump_active`] rewrites
+/// `is_jumping` — that pass deliberately clears the airborne double-jump pulses,
+/// which are onsets all the same.
+pub fn detect_impulse_onsets(ticks: &[TickRecord], num_cars: usize) -> Vec<Vec<bool>> {
+    ticks
+        .iter()
+        .map(|tick| {
+            (0..num_cars)
+                .map(|car| {
+                    tick.car_records
+                        .get(car)
+                        .is_some_and(|rec| rec.is_jumping || rec.is_flipping)
+                })
+                .collect()
+        })
+        .collect()
+}
+
 /// Rewrite `is_jumping` from the observer's activation *pulse* into the sim's
 /// sustained flag, and report how many (tick, car) pairs changed.
 ///

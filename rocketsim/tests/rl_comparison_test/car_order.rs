@@ -36,7 +36,12 @@ pub fn reorder_cars(recording: &mut Recording) {
     let dt = rocketsim::consts::TICK_TIME / recording.stride.max(1) as f32;
     let mut tracks: Vec<Option<Track>> = vec![None; n];
 
+    // Zip the onset marks so they follow the same permutation; they are indexed
+    // by canonical car and would otherwise silently point at the wrong car.
+    let mut onsets = recording.impulse_onsets.iter_mut();
+
     for tick in recording.ticks.iter_mut() {
+        let onset_row = onsets.next();
         if tick.car_records.len() != n {
             continue;
         }
@@ -59,6 +64,12 @@ pub fn reorder_cars(recording: &mut Recording) {
         let old = tick.car_records.clone();
         for (current, &canon) in assignment.iter().enumerate() {
             tick.car_records[canon] = old[current];
+        }
+        if let Some(row) = onset_row.filter(|r| r.len() == n) {
+            let old_row = row.clone();
+            for (current, &canon) in assignment.iter().enumerate() {
+                row[canon] = old_row[current];
+            }
         }
 
         // Advance the tracks (in canonical order).

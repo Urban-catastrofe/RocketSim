@@ -20,6 +20,7 @@ mod cpp_runner;
 mod deep_dive;
 #[allow(dead_code)]
 mod diagnose;
+mod impulse_window;
 mod measure;
 mod recording;
 mod report;
@@ -91,9 +92,23 @@ fn test_recording(recording: &Recording) {
     // ── Per-tick restore mode (gated physics accuracy, sharded across threads) ──
     let mut report = runner::run_per_tick(recording, &cfg);
 
-    let (outcome, lines) = report::evaluate(&mut report, &cfg);
+    let (mut outcome, lines) = report::evaluate(&mut report, &cfg);
     for line in &lines {
         println!("{line}");
+    }
+
+    // ── Impulse windows (jump / double jump / flip) ──
+    // The per-tick pass skips the two steps around each press because their
+    // split is set by an unrecorded sub-frame phase; this measures the impulse
+    // over the pair, where that phase cancels, so impulses stay gated.
+    let impulse_report = impulse_window::measure_impulses(recording, &cfg);
+    for line in impulse_window::impulse_lines(&impulse_report, &cfg) {
+        println!("{line}");
+    }
+    let impulse_violations = impulse_window::violations(&impulse_report, &cfg);
+    if !impulse_violations.is_empty() {
+        outcome.passed = false;
+        outcome.violations.extend(impulse_violations);
     }
     if cfg.emit_segments {
         for line in report::segment_lines(&report, &cfg) {
