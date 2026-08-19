@@ -5,11 +5,16 @@ sim and measures **per-tick physics divergence**. It is built to be driven by a
 human or an LLM chasing accuracy: survey the numbers, find the worst offender,
 deep-dive it, fix the sim, watch the number drop.
 
-> ⚠️ The current recordings were captured at 240 Hz and are being re-recorded
-> at 120 Hz. The harness **auto-detects the tick rate and hard-rejects**
-> anything that is not 120 Hz (stride ≠ 1) with an error, because a 240 Hz
-> source is too unreliable to sample for rocketsim tests. Until the set is
-> re-recorded, every case fails with that message.
+> The harness **auto-detects the tick rate and hard-rejects** anything that is
+> not 120 Hz (stride ≠ 1) with an error, because a 240 Hz source is too
+> unreliable to sample for rocketsim tests. The current recording set is 120 Hz
+> (`stride=1`), so it is accepted.
+
+> ⚠️ `rocketsim/collision_meshes` is a symlink to an out-of-tree asset folder.
+> On a checkout with `core.symlinks=false` (Windows default) it lands as a
+> 42-byte text file and every case panics with
+> `./collision_meshes/ does not exist`. Replace it with a real directory (or a
+> junction) holding `soccar/*.cmf` before running anything.
 
 ## Residual Analysis (RLRESID)
 
@@ -79,6 +84,24 @@ over two ticks converges in velocity immediately, with a ~1.7 UU max position
 offset — measured with a dedicated test). Modeling it would not improve
 accuracy.
 
+## The Accuracy Bar
+
+A case **passes** when no single simulated step diverges from the recording by
+more than **0.03** in the field's native unit — 0.03 UU of position and
+0.03 UU/s of velocity — for *every* entity on *every* tick. The gate is a
+maximum, not a percentile (`percentile = 1.0`): one bad step fails the case.
+
+Because the per-tick pass restores ground truth before every step, this measures
+single-step physics error in isolation, which is exactly "per step divergence".
+
+This is a deliberately hard bar. As of the last full survey (468 cases,
+683k entity-tick samples) **41 cases pass**; contactless motion (aerials, air
+roll, free-flight and slow-rolling ball) sits at 0.006–0.025, while anything
+involving a collision or a car-ball impulse spikes on the contact tick — a plain
+`ball_bounce_ground` keeps 97.4% of ticks under 0.03 UU but hits 3.18 UU on the
+bounce. Use `RLGATE=off` with loosened `RL_*_TOL` when you need a metric that
+discriminates progress rather than a pass/fail.
+
 ## Quick Start
 
 ```bash
@@ -115,12 +138,12 @@ test.
 ## Reading a Report Line
 
 ```
-[drive_5] car_0 vel : p=15.06 max=58.4@t196 mean=6.5 rms=11.0 bias=2.4 over=100% budget=0.5 -> FAIL
+[drive_5] car_0 vel : p=15.06 max=58.4@t196 mean=6.5 rms=11.0 bias=2.4 over=100% budget=0.03 -> FAIL
 ```
 
 | token | meaning |
 |---|---|
-| `p` | the gated percentile (default p95) of the per-tick error magnitude |
+| `p` | the gated percentile of the per-tick error magnitude (default p100, i.e. the max) |
 | `max@tN` | worst single-tick error and the tick index it happened at |
 | `mean` / `rms` | average magnitude / root-mean-square magnitude |
 | `bias` | magnitude of the **mean signed error vector** (a `bias_vec` line below gives direction). Non-zero bias = a wrong constant/formula; scatter with ~0 bias = integration precision |
@@ -146,8 +169,8 @@ order/quantization, often acceptable.
 | `RLCPP` | `1` to also replay through the **C++ RocketSim** (`rocketsim_rs` bindings) and report side-by-side. Requires `--features cpp-compare` | off |
 | `RLROLL` | rollout mode: restore at sampled ticks, free-run `1s`/`2s`/`<ticks>` with recorded controls, report the error growth curve | off |
 | `RLROLL_STRIDE` | distance (ticks) between rollout start ticks | `120` |
-| `RL_POS_TOL` / `RL_VEL_TOL` / `RL_ANGVEL_TOL` / `RL_ROT_TOL` | budget overrides | 0.1 / 0.5 / 0.5 / 0.02 |
-| `RL_PERCENTILE` | gate percentile (0..1) | 0.95 |
+| `RL_POS_TOL` / `RL_VEL_TOL` / `RL_ANGVEL_TOL` / `RL_ROT_TOL` | budget overrides | 0.03 / 0.03 / 0.5 / 0.02 |
+| `RL_PERCENTILE` | gate percentile (0..1); `1.0` = gate on the worst step | `1.0` |
 
 ## C++ RocketSim Comparison (RLCPP)
 
@@ -336,8 +359,7 @@ Then rebuild and test:
 rm -rf target/debug/build/rocketsim-* && cargo test -p rocketsim
 ```
 
-Record at **120 Hz** to match the sim tick rate (the current 240 Hz set is
-being replaced).
+Record at **120 Hz** to match the sim tick rate.
 
 ## Dealing with Corrupted Recordings
 

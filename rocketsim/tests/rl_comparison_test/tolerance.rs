@@ -4,6 +4,12 @@
 //! reproducing a recorded Rocket League replay. They are the "angle to
 //! chase": tighten them as the sim gets more accurate.
 //!
+//! The bar is **0.03 divergence on the worst single step** (`percentile = 1.0`)
+//! for both hard-gated fields: 0.03 UU of position and 0.03 UU/s of velocity.
+//! A case fails if any one entity, on any one tick, exceeds that. Loosen via
+//! `RL_POS_TOL` / `RL_VEL_TOL` / `RL_PERCENTILE` when surveying rather than
+//! gating.
+//!
 //! Two gates exist:
 //! - **hard** fields fail the test when their percentile exceeds the budget.
 //! - **soft** fields are reported (and warned about) but never fail the test.
@@ -20,18 +26,22 @@ pub struct PhysicsTolerance {
     pub ang_vel: f32,
     /// Rotation axis error budget (unit-vector chord distance, 0..=2).
     pub rot: f32,
-    /// Percentile used for gating (0..=1). Spikes rarer than this are tolerated.
+    /// Percentile used for gating (0..=1). `1.0` gates on the **worst single
+    /// step** — no spike is tolerated. Lower it to tolerate rare outliers.
     pub percentile: f32,
 }
 
 impl Default for PhysicsTolerance {
     fn default() -> Self {
         Self {
-            pos: 0.1,
-            vel: 0.5,
+            // The accuracy bar: no single simulated step may diverge from the
+            // recording by more than 0.03 in the field's native unit.
+            pos: 0.03,
+            vel: 0.03,
             ang_vel: 0.5,
             rot: 0.02,
-            percentile: 0.95,
+            // Gate on the maximum, not a percentile: one bad step is a failure.
+            percentile: 1.0,
         }
     }
 }

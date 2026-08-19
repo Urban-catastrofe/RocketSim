@@ -184,6 +184,17 @@ pub fn evaluate(report: &mut Report, cfg: &HarnessConfig) -> (GateOutcome, Vec<S
         (tol.percentile * 100.0) as i32,
     ));
 
+    // A case that compared nothing proves nothing: every field reports 0.0 and
+    // would sail through the gate. Truncated or fully-discontinuous recordings
+    // must fail loudly rather than inflate the pass count.
+    if report.ticks_measured == 0 {
+        outcome.passed = false;
+        outcome.violations.push(format!(
+            "no ticks measured ({} voided) - nothing was verified",
+            report.ticks_voided,
+        ));
+    }
+
     // Worst hard-gated error across focused entities, for deep-dive targeting.
     let mut worst_mag: f32 = -1.0;
 
@@ -199,7 +210,9 @@ pub fn evaluate(report: &mut Report, cfg: &HarnessConfig) -> (GateOutcome, Vec<S
             let bias = run.bias_mean();
             let bias_mag = bias.length();
 
-            let verdict = if is_hard && p > budget {
+            let verdict = if run.count == 0 {
+                "n/a"
+            } else if is_hard && p > budget {
                 "FAIL"
             } else if is_hard {
                 "pass"
