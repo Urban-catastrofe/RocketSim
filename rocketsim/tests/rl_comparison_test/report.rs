@@ -382,6 +382,13 @@ pub fn state_lines(report: &Report, cfg: &HarnessConfig) -> Vec<String> {
                 st.jump_time_err.count
             ));
         }
+        if st.wheel_count_err.max > 0.0 {
+            timers.push(format!(
+                "wheel_count |dn| mean={:.4} max={:.0}",
+                st.wheel_count_err.mean(),
+                st.wheel_count_err.max
+            ));
+        }
         if !timers.is_empty() {
             lines.push(format!(
                 "[{}] STATE {:>7} timers: {}",

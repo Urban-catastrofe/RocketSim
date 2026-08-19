@@ -20,10 +20,11 @@ pub enum StateFlag {
     Boosting,
     Supersonic,
     Demoed,
+    WheelsContact,
 }
 
 impl StateFlag {
-    pub const ALL: [StateFlag; 9] = [
+    pub const ALL: [StateFlag; 10] = [
         StateFlag::OnGround,
         StateFlag::Jumping,
         StateFlag::HasJumped,
@@ -33,6 +34,7 @@ impl StateFlag {
         StateFlag::Boosting,
         StateFlag::Supersonic,
         StateFlag::Demoed,
+        StateFlag::WheelsContact,
     ];
 
     pub fn label(&self) -> &'static str {
@@ -46,6 +48,7 @@ impl StateFlag {
             StateFlag::Boosting => "is_boosting",
             StateFlag::Supersonic => "is_supersonic",
             StateFlag::Demoed => "is_demoed",
+            StateFlag::WheelsContact => "wheels_contact",
         }
     }
 }
@@ -56,6 +59,34 @@ fn record_double_jumped(real: &CarRecord) -> bool {
 }
 fn record_flipped(real: &CarRecord) -> bool {
     real.double_jumped_or_flipped && real.is_flipping
+}
+
+/// Wheels in contact, split front pair / back pair.
+///
+/// Compared per pair rather than as an exact four-bit mask because the
+/// recording's left/right order within a pair cannot be pinned down from the
+/// data: `{0,2}` and `{1,3}` are the two common side-lift masks in near-equal
+/// numbers (3148 vs 3108 across the suite), `steer_amount` is never populated
+/// so the front pair cannot be identified that way, and the sim's own
+/// `right_dir_2d` naming contradicts the right-handed forward/up convention.
+/// The front/back grouping *is* certain — indices 0,1 share a suspension length
+/// and 2,3 share another whenever the car is level — and a per-pair count is
+/// what `is_on_ground`'s `n >= 3` rule actually turns on, so nothing actionable
+/// is lost. A left/right lift swap is the one blind spot.
+fn pred_wheel_pairs(pred: &CarState) -> (u8, u8) {
+    let w = &pred.wheels_with_contact;
+    (
+        u8::from(w[0]) + u8::from(w[1]),
+        u8::from(w[2]) + u8::from(w[3]),
+    )
+}
+
+fn record_wheel_pairs(real: &CarRecord) -> (u8, u8) {
+    let w = &real.wheels;
+    (
+        u8::from(w[0].has_contact) + u8::from(w[1].has_contact),
+        u8::from(w[2].has_contact) + u8::from(w[3].has_contact),
+    )
 }
 
 fn flag_value(flag: StateFlag, pred: &CarState, real: &CarRecord) -> (bool, bool) {
@@ -69,6 +100,9 @@ fn flag_value(flag: StateFlag, pred: &CarState, real: &CarRecord) -> (bool, bool
         StateFlag::Boosting => (pred.is_boosting, real.is_boosting),
         StateFlag::Supersonic => (pred.is_supersonic, real.is_supersonic),
         StateFlag::Demoed => (pred.is_demoed, real.is_demoed),
+        // Handled by `pred_wheel_pairs` / `record_wheel_pairs` in `record`;
+        // it is a pair of counts rather than a single boolean.
+        StateFlag::WheelsContact => (false, false),
     }
 }
 
@@ -110,17 +144,31 @@ pub struct StateStats {
     pub air_time_err: TimerStats,
     /// jump_time error, counted while either side is in the jump phase.
     pub jump_time_err: TimerStats,
+    /// Absolute difference in the number of wheels in contact, counted on every
+    /// tick. `TimerStats` is just a running abs-error accumulator; the name is
+    /// historical.
+    pub wheel_count_err: TimerStats,
 }
 
 impl StateStats {
     pub fn record(&mut self, pred: &CarState, real: &CarRecord) {
         self.total += 1;
+        let pred_pairs = pred_wheel_pairs(pred);
+        let real_pairs = record_wheel_pairs(real);
         for (i, flag) in StateFlag::ALL.iter().enumerate() {
-            let (p, r) = flag_value(*flag, pred, real);
-            if p != r {
+            let mismatched = if matches!(flag, StateFlag::WheelsContact) {
+                pred_pairs != real_pairs
+            } else {
+                let (p, r) = flag_value(*flag, pred, real);
+                p != r
+            };
+            if mismatched {
                 self.mismatches[i] += 1;
             }
         }
+        let pred_n = i16::from(pred_pairs.0 + pred_pairs.1);
+        let real_n = i16::from(real_pairs.0 + real_pairs.1);
+        self.wheel_count_err.add(f32::from(pred_n - real_n));
         if !pred.is_on_ground || !real.is_on_ground {
             self.air_time_err.add(pred.air_time - real.air_time);
         }
@@ -145,5 +193,6 @@ impl StateStats {
         }
         self.air_time_err.merge(other.air_time_err);
         self.jump_time_err.merge(other.jump_time_err);
+        self.wheel_count_err.merge(other.wheel_count_err);
     }
 }

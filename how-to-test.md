@@ -322,6 +322,27 @@ their percentile exceeds the budget. The others are **soft** (reported only).
 *timing* bugs, a different fix from integration errors, so they don't fail the
 test.
 
+`wheels_contact` is the sharpest flag in that channel and the one to look at
+first for anything involving the ground. RLPR stores per-wheel contact (contrary
+to a since-corrected comment in `runner.rs`), and RL's own grounding rule is
+exactly the sim's: across 510015 samples, recorded `on_ground` equals
+`wheel_count >= 3` at the same tick index in **100.0000%** of cases, with no
+exceptions. That makes wheel contact strictly upstream of `is_on_ground`, and
+measurably sharper — it caught 2.132% of ticks against `is_on_ground`'s 0.672%
+on the pre-fix ray, a 3.2× higher hit rate, because most wheel disagreements
+never cross the 3-of-4 threshold. Fixing the ray length halved both (to 1.065%
+and 0.340%). The companion `wheel_count |dn|` figure on the STATE timers line
+gives the magnitude.
+
+The comparison is per **pair** (front count, back count), not an exact four-bit
+mask, because the recording's left/right order within a pair cannot be pinned
+down: `{0,2}` and `{1,3}` are the two common side-lift masks in near-equal
+numbers (3148 vs 3108), `steer_amount` is never populated so the front pair
+cannot be identified from it, and the sim's own `right_dir_2d` naming
+contradicts the right-handed forward/up convention. Front/back grouping *is*
+certain, and a per-pair count is what `n >= 3` turns on. A left/right lift swap
+is the one blind spot.
+
 ## Reading a Report Line
 
 ```
