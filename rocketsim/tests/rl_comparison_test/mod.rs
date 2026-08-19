@@ -29,10 +29,21 @@ mod runner;
 mod state;
 mod stats;
 mod tolerance;
+mod validate;
 
 use config::{DeepDiveMode, GateMode, HarnessConfig};
 
 fn test_recording(recording: &Recording) {
+    // Reject ground truth the sim cannot legitimately be graded against, before
+    // any measurement path runs. RLNOVALIDATE=1 bypasses this while
+    // investigating a suspect recording.
+    if !matches!(
+        std::env::var("RLNOVALIDATE").as_deref(),
+        Ok("1") | Ok("true")
+    ) {
+        validate::assert_usable_ground_truth(recording);
+    }
+
     // RLDIAG=1: dump recording events (teleports/demos) instead of measuring.
     if std::env::var("RLDIAG").is_ok() {
         diagnose::dump_events(recording);

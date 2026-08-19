@@ -84,6 +84,34 @@ over two ticks converges in velocity immediately, with a ~1.7 UU max position
 offset — measured with a dedicated test). Modeling it would not improve
 accuracy.
 
+## Ground-Truth Validation
+
+A recording is the *reference* the sim is graded against, so an impossible one
+does not add noise — it inverts the metric, penalising the sim for being right.
+`validate.rs` rejects such recordings before measurement, and the case fails with
+`UNUSABLE GROUND TRUTH` naming the offending car.
+
+The check in place: RL launches a grounded car at ~300 UU/s along its own up-axis
+on the tick jump is pressed, so a grounded press producing no up-axis velocity
+within 3 ticks did not happen in physics. A recording is rejected only when
+*every* observable press fails — one failure can be legitimate (a car wedged
+under the ball), but none of them ever launching is a pinned car. The up-axis
+(not world Z) is used so wall, ceiling and upside-down cars are judged by the
+direction they would actually launch.
+
+**44 of the original 468 recordings were quarantined to
+`test_recordings_invalid/` by this check (2026-08).** They hold jump while
+flagged `is_on_ground`, set `has_jumped`, count `jump_time` up — and never move
+the car (peak up-axis velocity 0.1–0.5 UU/s). The cars were pinned by a
+state-set loop while recording: the inputs reached the state machine but the
+physics was overridden. They made flips the worst-scoring mechanism in the suite
+(sideflip mean 15.3 UU/s) by charging the sim 300–450 UU/s for correctly
+launching a car the recording holds still, and five of them were *passing* the
+gate while verifying nothing about jumping. Re-record them before restoring any.
+
+Set `RLNOVALIDATE=1` to bypass the check while investigating a suspect
+recording.
+
 ## The Accuracy Bar
 
 A case **passes** when no single simulated step diverges from the recording by
@@ -159,6 +187,7 @@ order/quantization, often acceptable.
 | Env var | Meaning | Default |
 |---|---|---|
 | `RLGATE` | `strict` \| `off` — enforce physics budgets | `strict` |
+| `RLNOVALIDATE` | `1` to skip the ground-truth validity check | off |
 | `RLDEEP` | `fail` \| `always` \| `never` — when to emit a deep dive | `fail` |
 | `RLDEEP_RADIUS` | context ticks on *each side* of the deep-dive center | `15` |
 | `RLCAR` | focus one car index (`0`…), or `all` | `all` |
@@ -294,10 +323,16 @@ via `RLCONT=1` to keep the default fast path to one parallel pass.
 
 - The **gate (percentile)** is bit-identical across thread counts and runs.
 - `RLTHREADS=1` is fully deterministic for every reported number.
-- Under multiple threads, *secondary* stats (mean/rms/max) carry a tiny amount
-  of variance: the bullet physics vehicle keeps stateful suspension/solver
-  state across `step_tick` that a state-restore does not reset, so a shard's
-  first ticks run on a "cold" arena. This does **not** affect the gate. For
+- Every tick in range is measured at every thread count. Each shard warms its
+  cold arena by re-stepping its own first tick and discarding the result, so
+  manifold settling costs no coverage. (It used to consume the first two
+  *measured* ticks of each shard, which hid real divergence — including a
+  7.5 UU/s jump-impulse error at t=0 that let a case pass at `max=0.014` — and
+  is what made the numbers move with the thread count.)
+- Under multiple threads, `mean`/`rms` still carry a tiny amount of variance:
+  bullet keeps stateful suspension/solver state across `step_tick` that a
+  state-restore does not reset, so the arena state entering a shard-start tick
+  differs from a mid-shard tick. This does **not** affect the gate or `max`. For
   bit-exact reproduction of a specific number, use `RLTHREADS=1`.
 - The deep dive always re-drives single-threaded, so it is deterministic.
 
@@ -378,6 +413,7 @@ rocketsim/tests/
     mod.rs                        → thin orchestrator (run case, gate, dive)
     config.rs                     → env-var knobs (RLDEEP, RLCAR, RLTICK, …)
     tolerance.rs                  → per-field physics budgets
+    validate.rs                   → ground-truth validity checks
     stats.rs                      → Field/Segment vocab + running/percentile stats
     measure.rs                    → lean per-tick deltas (hot path, no alloc)
     state.rs                      → state-machine mismatch-rate channel
@@ -392,6 +428,7 @@ rocketsim/tests/
       tick_record.rs              → per-tick record container
     test_recordings/*.rlpr        → ground truth recordings (auto-discovered)
     test_recordings_corrupt/      → old recordings with bad rotation data
+    test_recordings_invalid/      → rejected by validate.rs (pinned cars)
 ```
 
 ## Recent Physics Changes (2024–2025)

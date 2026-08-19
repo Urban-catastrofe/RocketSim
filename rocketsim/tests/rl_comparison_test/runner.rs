@@ -57,6 +57,13 @@ const MAX_PHYS_DISPLACEMENT: f32 = 100.0;
 
 /// Restore+step cycles to run on a fresh shard arena before measuring, so the
 /// Bullet contact manifolds settle (a cold arena's first steps diverge).
+///
+/// These cycles are spent re-stepping the shard's *first* tick and their results
+/// are thrown away, so every tick in the shard's range is still measured.
+/// Previously the warmup consumed the first two measured ticks instead, which
+/// silently hid real divergence — a genuine 7.5 UU/s jump-impulse error at t=0
+/// went unreported — and made the secondary stats depend on the thread count,
+/// because each shard dropped its own first two ticks.
 pub const SHARD_WARMUP_TICKS: usize = 2;
 
 /// True if the recording's `i -> i + stride` transition is non-physical (any
@@ -267,10 +274,23 @@ fn run_per_tick_shard(recording: &Recording, shard: &[usize]) -> Report {
     let mut report = Report::new(recording.name.clone(), stride, num_cars, shard.len());
     let mut controls_buf: Vec<CarControls> = vec![CarControls::DEFAULT; num_cars];
 
-    // The first step or two on a fresh (cold) arena diverge before the Bullet
-    // contact manifolds settle, so run a few restore+step cycles without
-    // measuring them to warm the arena up.
-    let mut warmup_left = SHARD_WARMUP_TICKS;
+    // Warm the cold arena up so Bullet's contact manifolds settle before we
+    // measure anything. Re-step the shard's first usable tick and discard the
+    // results: state is fully restored every cycle, so repeating one tick
+    // settles the manifolds at the very geometry we are about to measure,
+    // without consuming (and thereby hiding) any tick in the shard's range.
+    if let Some(&first) = shard
+        .iter()
+        .find(|&&i| !has_discontinuity(recording, i, stride))
+    {
+        let from_tick = &recording.ticks[first];
+        let to_tick = &recording.ticks[first + stride];
+        controls_for(to_tick, &mut controls_buf);
+        for _ in 0..SHARD_WARMUP_TICKS {
+            set_state_to_record_tick(&mut arena, &car_idcs, from_tick, &controls_buf);
+            arena.step_tick();
+        }
+    }
 
     for &i in shard {
         // Void non-physical recording discontinuities (goal resets, demos,
@@ -287,11 +307,6 @@ fn run_per_tick_shard(recording: &Recording, shard: &[usize]) -> Report {
 
         set_state_to_record_tick(&mut arena, &car_idcs, from_tick, &controls_buf);
         arena.step_tick();
-
-        if warmup_left > 0 {
-            warmup_left -= 1;
-            continue;
-        }
 
         for (j, &car_idx) in car_idcs.iter().enumerate() {
             let real = &to_tick.car_records[j];
