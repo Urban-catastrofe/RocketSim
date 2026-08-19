@@ -15,6 +15,12 @@ deep-dive it, fix the sim, watch the number drop.
 > 42-byte text file and every case panics with
 > `./collision_meshes/ does not exist`. Replace it with a real directory (or a
 > junction) holding `soccar/*.cmf` before running anything.
+>
+> Beware that a plain `git stash` restores the committed symlink stub and
+> **deletes the real directory you put there**, so every case silently panics on
+> the next run. Scope the stash to source (`git stash push -- rocketsim/src
+> rocketsim/tests`) when comparing before/after, and re-check
+> `collision_meshes/soccar` afterwards.
 
 ## Residual Analysis (RLRESID)
 
@@ -112,6 +118,63 @@ gate while verifying nothing about jumping. Re-record them before restoring any.
 Set `RLNOVALIDATE=1` to bypass the check while investigating a suspect
 recording.
 
+## Observer-Semantics Normalisation
+
+The RLPR observer and the sim record some state-machine flags with genuinely
+different *meanings*. Restoring such a field verbatim does not add noise: it
+drives the sim into a state the recording never described, so the divergence
+that gets measured is the harness's fault, not the physics'.
+`recording/normalize.rs` translates them once at load time, so the gate, the
+residual decomposition, rollouts, deep dives and the C++ side-by-side all agree.
+
+**`is_jumping` is an activation pulse, not a sustained flag.** The observer sets
+it for exactly one tick — every one of the suite's 1626 `is_jumping` runs has
+length 1 — then clears it while `jump_time` keeps counting and the car keeps
+accelerating upward. The sim instead holds it for as long as the jump produces
+thrust and applies `jump::ACCEL` only while it is set, so restoring the pulse
+verbatim switched the sustained jump accel off on every tick of an ascent but
+the first, losing a flat `jump::ACCEL * TICK_TIME` ≈ 12.15 UU/s per tick. That
+was visible as a dead-constant 12.167 UU/s error on the interior ticks of every
+jump; after normalising, those ticks read 0.05 UU/s.
+
+Two details are load-bearing:
+
+- It must be a **whole-recording** pass. Distinguishing "this jump is still
+  running" from "the button was pressed again while `jump_time` happens to still
+  be small" needs the control history; a rule using only the current tick
+  disagrees with the replayed truth on 6086 ticks of the suite.
+- Only a **grounded** pulse arms the flag. The observer also pulses `is_jumping`
+  on an airborne *double* jump (71 of the 1626), but RL only ever starts a
+  sustained jump from the ground — a double jump is impulse-only — so arming
+  there invents thrust neither the game nor the sim has.
+
+The activation tick stays recoverable as `is_jumping && jump_time == 0.0`, which
+is how the immediate-force guards identify it.
+
+## Impulse Onset Ticks Cannot Be Gated Per-Tick
+
+Jump and flip impulses are applied by RL at the moment of the button press,
+which is **not** frame-aligned: the press lands at some sub-frame phase φ, and
+the impulse is split across the two recorded frames that straddle it, in
+proportion (1−φ):φ. φ is not recorded anywhere.
+
+The evidence is unambiguous. `physics_frame` increments by exactly 1 per
+recorded tick (uniform dt, no dropped frames) and each tick is self-consistent
+(Δpos = vel/120), yet the vertical velocity on the jump-onset tick ranges from
+**15.2 to 295.6 UU/s across recordings of the identical mechanic** — while the
+*total* over the two-frame window is always the full `jump::IMMEDIATE_FORCE`
+of 291.67 UU/s. Same story for flips: `car_sideflip_while_turning_left` splits
+one 521 UU/s dodge impulse 14%/86% across ticks 23 and 24.
+
+Consequence: **the two onset ticks of every jump, double jump and flip can never
+pass a 0.03 UU/s per-tick gate**, no matter how correct the physics is. The sim
+fires the whole impulse on the tick where the rising edge appears; the recording
+spread it over two. This is now the binding constraint on the pass count — the
+interior ticks of jumps are already at 0.05 UU/s. Measuring impulse physics
+honestly needs a two-tick window comparison (where φ cancels) rather than a
+per-tick one; until that exists, treat onset-tick errors as unmeasured rather
+than as physics defects.
+
 ## The Accuracy Bar
 
 A case **passes** when no single simulated step diverges from the recording by
@@ -122,12 +185,13 @@ maximum, not a percentile (`percentile = 1.0`): one bad step fails the case.
 Because the per-tick pass restores ground truth before every step, this measures
 single-step physics error in isolation, which is exactly "per step divergence".
 
-This is a deliberately hard bar. As of the last full survey (468 cases,
-683k entity-tick samples) **41 cases pass**; contactless motion (aerials, air
-roll, free-flight and slow-rolling ball) sits at 0.006–0.025, while anything
-involving a collision or a car-ball impulse spikes on the contact tick — a plain
-`ball_bounce_ground` keeps 97.4% of ticks under 0.03 UU but hits 3.18 UU on the
-bounce. Use `RLGATE=off` with loosened `RL_*_TOL` when you need a metric that
+This is a deliberately hard bar. As of the last full survey **32 of the 424
+valid cases pass**; contactless motion (aerials, air roll, free-flight and
+slow-rolling ball) sits at 0.006–0.025, while anything involving a collision or
+an impulse spikes on the contact tick — a plain `ball_bounce_ground` keeps 97.4%
+of ticks under 0.03 UU but hits 3.18 UU on the bounce. Most of the remaining
+failures are a *single* tick: see "Impulse Onset Ticks" above for why jump and
+flip cases cannot clear the bar on the two frames that straddle a button press. Use `RLGATE=off` with loosened `RL_*_TOL` when you need a metric that
 discriminates progress rather than a pass/fail.
 
 ## Quick Start
@@ -414,6 +478,7 @@ rocketsim/tests/
     config.rs                     → env-var knobs (RLDEEP, RLCAR, RLTICK, …)
     tolerance.rs                  → per-field physics budgets
     validate.rs                   → ground-truth validity checks
+    recording/normalize.rs        → observer-semantics → sim-semantics
     stats.rs                      → Field/Segment vocab + running/percentile stats
     measure.rs                    → lean per-tick deltas (hot path, no alloc)
     state.rs                      → state-machine mismatch-rate channel

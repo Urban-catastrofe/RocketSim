@@ -516,13 +516,15 @@ impl Car {
         if self.state.is_jumping {
             self.state.has_jumped = true;
 
-            // Rocket League (and C++ RocketSim) scale the sustained jump accel
-            // down before the minimum jump time has elapsed.
-            let mut jump_accel = mutator_config.jump_accel;
-            if self.state.jump_time < car_consts::jump::MIN_TIME {
-                jump_accel *= car_consts::jump::PRE_MIN_ACCEL_SCALE;
-            }
-            let jump_force = up_dir * jump_accel * const { UU_TO_BT * TICK_TIME };
+            // Full accel from the first tick: Rocket League applies no ramp-up
+            // before `MIN_TIME`. Ground truth is unambiguous — across seven
+            // recordings the net grounded vertical accel is +4.02 UU/s/tick and
+            // dead constant straight through the `MIN_TIME` boundary (e.g.
+            // `car_jump_after_turning_left` reads +4.0401, +4.0400, +4.0402,
+            // +4.0402 at jump_time 0.0083..0.0333). C++ RocketSim scales by
+            // 0.62 here, which yields -0.58 instead, and its own source marks
+            // the scale "preferably don't use this system at all".
+            let jump_force = up_dir * mutator_config.jump_accel * const { UU_TO_BT * TICK_TIME };
             rb.add_impulse(Some("Jump"), Impulse::Linear(jump_force), false, true);
         }
 

@@ -159,9 +159,6 @@ pub mod car {
     pub mod jump {
         pub const ACCEL: f32 = 4375.0 / 3.0;
         pub const IMMEDIATE_FORCE: f32 = 875.0 / 3.0;
-        /// Scale applied to the sustained jump accel before `MIN_TIME` elapses
-        /// (matches C++ RocketSim `_UpdateJump`).
-        pub const PRE_MIN_ACCEL_SCALE: f32 = 0.62;
         pub const MIN_TIME: f32 = 0.025;
         pub const RESET_TIME_PAD: f32 = 0.25;
         pub const MAX_TIME: f32 = 0.2;

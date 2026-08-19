@@ -1,5 +1,6 @@
 pub mod cpp_records;
 mod data_reader;
+mod normalize;
 pub mod tick_record;
 
 use std::io::ErrorKind;
@@ -93,6 +94,10 @@ impl Recording {
                 ),
             ));
         }
+
+        // Bring the observer's state-machine flags onto the sim's semantics
+        // before anything measures against them (see `normalize`).
+        normalize::normalize_jump_active(&mut ticks, num_cars);
 
         let stride = Self::detect_stride(&ticks);
         if stride != 1 {

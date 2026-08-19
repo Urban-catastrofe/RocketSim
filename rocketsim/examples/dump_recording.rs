@@ -163,7 +163,8 @@ fn main() {
                 let p = cr.phys.pos;
                 let v = cr.phys.lin_vel;
                 println!(
-                    "t={i:5} c{j}: pos=({:7.1},{:7.1},{:5.1}) vel=({:7.1},{:7.1},{:5.1}) av=({:5.2},{:5.2},{:5.2}) upz={:.3} g={} j={} jt={:.4} hj={} df={} flip={} ft={:.4} frt=({:.2},{:.2},{:.2}) atj={:.4} at={:.4} ctrl_jump={} boost={}",
+                    "t={i:5} c{j}: pf={:6} pos=({:7.1},{:7.1},{:5.1}) vel=({:7.1},{:7.1},{:5.1}) av=({:5.2},{:5.2},{:5.2}) upz={:.3} g={} j={} jt={:.4} hj={} df={} flip={} ft={:.4} frt=({:.2},{:.2},{:.2}) atj={:.4} at={:.4} ctrl_jump={} boost={}",
+                    cr.phys.physics_frame,
                     p.x, p.y, p.z, v.x, v.y, v.z,
                     cr.phys.ang_vel.x, cr.phys.ang_vel.y, cr.phys.ang_vel.z,
                     cr.phys.rot.rows[2].z,
