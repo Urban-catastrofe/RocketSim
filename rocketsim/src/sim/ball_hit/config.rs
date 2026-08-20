@@ -10,9 +10,11 @@ use crate::sim::linear_piece_curve::LinearPieceCurve;
 /// How often the extra ball-hit impulse may fire while the ball stays in
 /// contact with a car.
 ///
-/// The `EveryTick` and `OncePerEpisode` variants are not exercised by the
-/// default config (legacy `EveryOtherTick` preserves current behavior); they
-/// exist so the calibration loop can try each cadence against the recordings.
+/// The default is `OncePerEpisode`: RL delivers one extra impulse per contact,
+/// not one per contact tick. `EveryOtherTick` is what C++ RocketSim does and
+/// what this port used to do; it scores far worse on sustained contact
+/// (`car_ball_soft_touch` 55.8 vs 6.5 UU/s). The other variants are kept so the
+/// calibration loop can re-test each cadence against the recordings.
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HitCadence {

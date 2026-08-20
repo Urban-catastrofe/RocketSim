@@ -69,7 +69,10 @@ impl RolloutEntityReport {
         Self {
             label,
             is_car,
-            fields: Field::ALL.iter().map(|_| RolloutFieldReport::new(rollout_ticks)).collect(),
+            fields: Field::ALL
+                .iter()
+                .map(|_| RolloutFieldReport::new(rollout_ticks))
+                .collect(),
             state: StateStats::default(),
         }
     }
@@ -156,8 +159,7 @@ fn run_rollout_shard(recording: &Recording, shard: &[usize], cfg: &HarnessConfig
     let mut controls_buf: Vec<CarControls> = vec![CarControls::DEFAULT; num_cars];
     // Last measured per-entity field magnitudes for the current rollout, used
     // to update the worst-end tracker once the rollout's length is known.
-    let mut last_mag: Vec<[f32; Field::ALL.len()]> =
-        vec![[0.0; Field::ALL.len()]; num_cars + 1];
+    let mut last_mag: Vec<[f32; Field::ALL.len()]> = vec![[0.0; Field::ALL.len()]; num_cars + 1];
 
     // Warm the shard's arena once (cold Bullet manifolds diverge on the first
     // steps) using the first start tick, discarding the result.
@@ -293,9 +295,10 @@ pub fn run_rollout(recording: &Recording, cfg: &HarnessConfig) -> RolloutReport 
 }
 
 /// Horizons (in rollout steps) to print on the growth curve. Always includes
-/// the final step.
+/// the final step. 60/120/180/240 are the half-second marks, so a `RLROLL=2s`
+/// run reads off 0.5s/1.0s/1.5s/2.0s directly.
 fn sample_horizons(rollout_ticks: usize) -> Vec<usize> {
-    let mut hs: Vec<usize> = [1usize, 5, 15, 30, 60, 120, 240, 480]
+    let mut hs: Vec<usize> = [1usize, 5, 15, 30, 60, 120, 180, 240, 360, 480]
         .iter()
         .copied()
         .filter(|&h| h <= rollout_ticks)
@@ -340,7 +343,7 @@ pub fn rollout_lines(report: &RolloutReport, cfg: &HarnessConfig) -> Vec<String>
                     if s.count == 0 {
                         return None;
                     }
-                    Some(format!("t{}={:.3}", h, s.mean()))
+                    Some(format!("t{}={:.3}/n{}", h, s.mean(), s.count))
                 })
                 .collect();
             if curve.is_empty() {
@@ -354,6 +357,35 @@ pub fn rollout_lines(report: &RolloutReport, cfg: &HarnessConfig) -> Vec<String>
                 curve.join(" "),
                 fr.worst_end_mag,
                 fr.worst_end_start,
+            ));
+            // Systematic drift vs decorrelation. The mean *magnitude* above
+            // grows either way, so it cannot tell a wrong force from two
+            // trajectories that merely stopped agreeing. The mean *signed*
+            // error can: it only stays large when every rollout misses the
+            // same way, so the printed fraction bias/mag near 1 is a force
+            // error and near 0 is decorrelation.
+            let bias: Vec<String> = horizons
+                .iter()
+                .filter_map(|&h| {
+                    let s = fr.per_step.get(h - 1)?;
+                    if s.count == 0 {
+                        return None;
+                    }
+                    let (b, m) = (s.bias_mean().length(), s.mean());
+                    Some(format!(
+                        "t{}={:.3}/f{:.2}",
+                        h,
+                        b,
+                        if m > 0.0 { b / m } else { 0.0 }
+                    ))
+                })
+                .collect();
+            lines.push(format!(
+                "[{}] ROLLBIAS {:>7} {:<7}: {}",
+                report.name,
+                ent.label,
+                field.label(),
+                bias.join(" "),
             ));
         }
         if ent.is_car && ent.state.total > 0 {
