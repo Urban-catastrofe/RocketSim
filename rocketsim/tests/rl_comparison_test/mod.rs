@@ -55,7 +55,7 @@ fn test_recording(recording: &Recording) {
     // RLCENSUS=1..4: error-mass census by cause (see census.rs).
     if matches!(
         std::env::var("RLCENSUS").as_deref(),
-        Ok("1") | Ok("2") | Ok("3") | Ok("4") | Ok("true")
+        Ok("1") | Ok("2") | Ok("3") | Ok("4") | Ok("5") | Ok("6") | Ok("7") | Ok("true")
     ) {
         census::analyze(recording);
         return;

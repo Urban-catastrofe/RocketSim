@@ -93,7 +93,7 @@ struct Bucket {
     /// Worst few steps, for follow-up (`(mag, tick, car)`), largest first.
     worst: Vec<(f32, usize, usize)>,
     /// Signed residual (`sim - game`) summed in the car's own frame:
-    /// (forward, left, up). A bucket whose error is a consistent *bias* along
+    /// (forward, right, up). A bucket whose error is a consistent *bias* along
     /// one body axis is a mis-calibrated force along that axis; one whose
     /// signed sum cancels to near zero is timing or noise, and recalibrating a
     /// coefficient against it would just fit noise.
@@ -148,6 +148,12 @@ impl Bucket {
 thread_local! {
     /// Set from `RLCENSUS=4`: band by `friction_curve_input` instead of speed.
     static BAND_BY_FCI: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Set from `RLCENSUS=5`: band by recorded suspension compression.
+    static BAND_BY_SUSP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Set from `RLCENSUS=6`: band by compression crossed with compression rate.
+    static BAND_BY_SUSP_RATE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Set from `RLCENSUS=7`: 1-UU compression bands, quiet suspension only.
+    static BAND_BY_SUSP_FINE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Secondary split of a bucket: forward speed band, plus whether the handbrake
@@ -155,7 +161,97 @@ thread_local! {
 /// 0 and 1 where `POWERSLIDE_RISE_RATE`/`FALL_RATE` govern the value; scripted
 /// recordings hold it down and sit at 1. If the ramped ticks carry the error,
 /// the defect is the ramp rate, not the friction curve.
-fn band_of(from: &CarRecord) -> String {
+fn band_of(from: &CarRecord, to: &CarRecord) -> String {
+    if BAND_BY_SUSP_FINE.with(std::cell::Cell::get) {
+        // 1-UU compression bands, restricted to steps where the suspension is
+        // not moving much, so the damping term contributes nothing and the
+        // residual isolates the spring force-vs-compression curve.
+        let mean = |c: &CarRecord| {
+            let mut sum = 0.0;
+            let mut n = 0;
+            for w in &c.wheels {
+                if w.has_contact {
+                    sum += w.susp_length;
+                    n += 1;
+                }
+            }
+            if n == 4 { Some(sum / 4.0) } else { None }
+        };
+        let (Some(a), Some(b)) = (mean(from), mean(to)) else {
+            return "/x".to_string();
+        };
+        if (b - a).abs() > 0.5 {
+            return "/x".to_string();
+        }
+        // Compression in UU below the ray's zero, i.e. -susp_length.
+        let c = -a;
+        if !(0.0..12.0).contains(&c) {
+            return "/x".to_string();
+        }
+        return format!("/comp{:02}", c as u32);
+    }
+    if BAND_BY_SUSP_RATE.with(std::cell::Cell::get) {
+        // 2D: how compressed the suspension is, crossed with how fast it is
+        // compressing. `susp_rel_vel` is a dead field in every recording, so the
+        // rate is derived from the `susp_length` delta across the step (UU per
+        // tick; negative = compressing). The spring term depends on compression
+        // alone and the damping term on the rate, so a residual that tracks one
+        // axis and not the other names which of the two is wrong.
+        let mean = |c: &CarRecord| {
+            let mut sum = 0.0;
+            let mut n = 0;
+            for w in &c.wheels {
+                if w.has_contact {
+                    sum += w.susp_length;
+                    n += 1;
+                }
+            }
+            if n == 0 { None } else { Some(sum / n as f32) }
+        };
+        let (Some(a), Some(b)) = (mean(from), mean(to)) else {
+            return "/rate-nocontact".to_string();
+        };
+        let comp = match a {
+            v if v < -4.0 => "/c:heavy",
+            v if v < -2.5 => "/c:mod",
+            _ => "/c:rest",
+        };
+        let rate = match b - a {
+            r if r < -0.5 => "/r:compressing",
+            r if r > 0.5 => "/r:extending",
+            _ => "/r:steady",
+        };
+        return format!("{comp}{rate}");
+    }
+    if BAND_BY_SUSP.with(std::cell::Cell::get) {
+        // Mean recorded `susp_length` over contacting wheels: the sim's
+        // `suspension_length - suspension_rest_length_1` in UU. Equilibrium ride
+        // height is about -1.98; more negative is more compressed. This
+        // separates the suspension spring (acts at every compression) from
+        // `extra_pushback`, which only fires once a wheel is compressed past
+        // `ray_pushback_thresh`.
+        let mut sum = 0.0;
+        let mut n = 0;
+        for w in &from.wheels {
+            if w.has_contact {
+                sum += w.susp_length;
+                n += 1;
+            }
+        }
+        if n == 0 {
+            return "/susp-none".to_string();
+        }
+        let susp = sum / n as f32;
+        let band = match susp {
+            v if v < -8.0 => "/susp<-8",
+            v if v < -4.0 => "/susp-8..-4",
+            v if v < -2.5 => "/susp-4..-2.5",
+            v if v < -1.5 => "/susp-2.5..-1.5",
+            v if v < 0.0 => "/susp-1.5..0",
+            _ => "/susp0+",
+        };
+        return band.to_string();
+    }
     if BAND_BY_FCI.with(std::cell::Cell::get) {
         // Mean recorded `friction_curve_input` over contacting wheels: how
         // sideways the slide is. This is the input axis of `LAT_FRICTION` and
@@ -278,8 +374,11 @@ pub fn analyze(recording: &Recording) {
     // `RLCENSUS=3` splits each bucket by forward speed and handbrake ramp
     // state, to separate "the friction model is wrong" from "the friction model
     // is wrong in one corner of its input range".
-    let sub_band = mode == "3" || mode == "4";
+    let sub_band = matches!(mode.as_str(), "3" | "4" | "5" | "6" | "7");
     BAND_BY_FCI.with(|b| b.set(mode == "4"));
+    BAND_BY_SUSP.with(|b| b.set(mode == "5"));
+    BAND_BY_SUSP_RATE.with(|b| b.set(mode == "6"));
+    BAND_BY_SUSP_FINE.with(|b| b.set(mode == "7"));
     // `RLCTRLOFF=n` shifts which tick the step's controls are read from, to test
     // whether the harness has the recording's control alignment right. The
     // harness assumes tick T's `prev_controls` are the controls that drove the
@@ -340,11 +439,11 @@ pub fn analyze(recording: &Recording) {
                 recording.step_straddles_impulse(i, stride, j),
             );
             let key = if sub_band {
-                format!("{key}{}", band_of(from))
+                format!("{key}{}", band_of(from, to))
             } else {
                 key.to_string()
             };
-            // Residual in the car's own frame: forward / left / up.
+            // Residual in the car's own frame: forward / right / up.
             let rot = rot_of(&to.phys);
             let resid = sim_vel - Vec3A::from(to.phys.lin_vel);
             let local = Vec3A::new(
