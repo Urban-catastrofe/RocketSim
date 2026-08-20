@@ -261,47 +261,57 @@ common velocity 487.4) gives:
 forward and 248 up against 1087/1154 and 246 actual, effective restitution
 0.12–0.14.
 
-With the cooldown leak fixed and `RL_CAR_SOFTEN` disabled, `car_car_basic_bump`
-reads `vel_err` **6.54** (bumper) and **10.37** (victim), against 262.69 and
-1046.04 before. As with the flip, most of the apparent defect was measurement.
+With the cooldown leak fixed and the car-car softening removed,
+`car_car_basic_bump` reads `vel_err` **6.54** (bumper) and **10.37** (victim),
+against 262.69 and 1046.04 before. As with the flip, most of the apparent defect
+was measurement.
 
-#### `hit_car_phys_soften_speed` is not modelling anything real
+#### `hit_car_phys_soften_speed` is gone
 
-Its doc comment claims RL resolves car-car almost entirely via the bump impulse
-and that "the bullet inelastic response would reverse them".
+It scaled the car-car rigid-body response by `500 / |approach|`, justified by a
+comment claiming RL resolves car-car almost entirely via the bump impulse and
+that "the bullet inelastic response would reverse them".
 `car_car_head_on_bump` shows RL going **+1267.9 -> -1153.0** and
-**-1249.6 -> +1154.0**. RL *does* reverse them. Measured on the bump window
-across the 17 `car_car` cases (118 events, weighted mean):
+**-1249.6 -> +1154.0**. RL *does* reverse them, so the premise was wrong.
 
-| | soften=500 | soften off |
+The arithmetic was exact about it: at soften=500 the bumper in
+`car_car_basic_bump` read `sim dv` −278.5 against the game's −541.2, a ratio of
+0.515 — precisely `500/973`. The softening factor *was* the whole bumper-side
+error. Measured on the bump window across the 17 `car_car` cases (118 events):
+
+| case | with softening | removed |
 |---|---|---|
-| weighted mean | 531.41 | **421.28** |
+| **weighted mean** | 531.41 | **421.28** |
 | basic_bump | 263.78 | **8.46** |
 | head_on_bump | 566.14 | **10.60** |
 | diagonal_fast | 725.78 | **122.76** |
 | aerial_bump | 770.24 | **177.00** |
+| long_multi_bump | 844.28 | **385.58** |
 | boost_contest | **427.58** | 832.53 |
 | long_boost_headon | **466.07** | 687.18 |
 
-Note the exact arithmetic: at soften=500 the bumper in `car_car_basic_bump`
-reads `sim dv` −278.5 against the game's −541.2, a ratio of 0.515 — precisely
-`500/973`. The softening factor *is* the whole bumper-side error.
+Do not reintroduce it, and do not try to re-fit the constant. Splitting it into
+velocity and depenetration terms does nothing — `rhs_penetration` is always zero
+here because penetration stays above `SPLIT_IMPULSE_PENETRATION_THRESHOLD`, so
+the two configurations are byte-identical. Sweeping the constant gives only a
+shallow, contaminated optimum (per-tick total mean 245.87 @500, 239.48 @1000,
+232.08 @2000, 232.51 @3000, 236.16 @off), contaminated because the per-tick
+metric is dominated by the sub-frame ticks that cannot be measured at all.
 
-The cases that regress are only the ones where the cars deeply interpenetrate,
-and they point at **continuous collision detection**, not impulse magnitude. In
-`car_car_boost_contest` the closing speed is 4126 UU/s = 34.4 UU per tick,
-comparable to the hitbox depth: RL applies its impulse at the sub-frame moment
-of touching and the cars pass through, ending 85 UU apart (overlapping by 33)
-and separating gently at ±650 with +310 vz. Bullet's discrete detection jumps
-straight into deep overlap and resolves the accumulated penetration in one go.
-Softening masks that; it does not fix it.
+#### Open defect: car-car needs continuous collision detection
 
-Splitting the softening into velocity and depenetration terms was tried and does
-nothing: `rhs_penetration` is always zero here because penetration stays above
-`SPLIT_IMPULSE_PENETRATION_THRESHOLD`, so the two are byte-identical. Sweeping
-the constant gives only a shallow, contaminated optimum (per-tick total mean
-245.87 @500, 239.48 @1000, 232.08 @2000, 232.51 @3000, 236.16 @off) — which is
-why it should not be fitted that way.
+The two cases that got worse are the only ones where the cars deeply
+interpenetrate, and they are a detection problem rather than an impulse-magnitude
+one. In `car_car_boost_contest` the closing speed is 4126 UU/s = **34.4 UU per
+tick**, comparable to the hitbox depth (120.5 x 86.7 x 38.7). RL applies its
+impulse at the sub-frame moment of touching and the cars pass through, ending
+85 UU apart — overlapping by 33 — and separating gently at ±650 with +310 vz.
+Bullet's discrete detection steps straight into deep overlap and resolves the
+accumulated penetration in one go, which is where the ±2300–2400 UU/s window
+errors on `boost_contest` and `long_boost_headon` come from.
+
+This is the next thing to fix in the subsystem. The softening was hiding it, at
+the cost of every clean impact.
 
 ### Known Impulse Defects
 

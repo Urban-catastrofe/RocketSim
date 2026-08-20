@@ -73,7 +73,7 @@ pub mod arena {
 }
 
 pub mod car {
-        use super::{PhysicsCoefs, UU_TO_BT};
+    use super::PhysicsCoefs;
 
     pub const MASS_BT: f32 = 180.0;
 
@@ -96,21 +96,6 @@ pub mod car {
         friction: 0.09,
         restitution: 0.1,
     };
-
-    /// Softening speed for the car-car physical response (UU/s). Real RL
-    /// resolves car-car almost entirely via the bump impulse (head-on cars slow
-    /// to ~650 UU/s and pass through); the bullet inelastic response would
-    /// reverse them. The response is softened proportionally to impact speed:
-    /// `scale = SOFTEN_SPEED / |approach|`, so slow crossings still separate at
-    /// full strength while high-speed head-ons stay bump-dominated. Overridable
-    /// via `RL_CAR_SOFTEN` (UU/s) for calibration sweeps.
-    pub fn hit_car_phys_soften_speed() -> f32 {
-        std::env::var("RL_CAR_SOFTEN")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(500.0)
-            * UU_TO_BT
-    }
 
     pub const MAX_SPEED: f32 = 2300.0;
 

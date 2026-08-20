@@ -143,17 +143,6 @@ impl SeqImpulseConstraintSolver {
             body0.companion_id = Some(solver_body_id_a);
             body1.companion_id = Some(solver_body_id_b);
 
-            // Real RL resolves car-car contact primarily via the RL bump impulse
-            // (Arena::on_car_car_collision); the rigid-body response is a weak
-            // secondary effect — head-on cars slow to ~650 UU/s and pass through
-            // rather than elastically bouncing (RLPR ground truth
-            // `car_car_long_boost_headon`). Soften the solver response for
-            // car-car manifold points instead of applying the full inelastic
-            // barrier. The bump still fires independently from the contact
-            // records.
-            let is_car_car = body0.user_idx == crate::sim::UserInfoTypes::Car
-                && body1.user_idx == crate::sim::UserInfoTypes::Car;
-
             for cp in &mut manifold.point_cache {
                 assert!(cp.distance_1 <= manifold.contact_processing_threshold);
 
@@ -181,7 +170,6 @@ impl SeqImpulseConstraintSolver {
                         cp,
                         friction_idx,
                         time_step,
-                        is_car_car,
                     ),
                 );
 
