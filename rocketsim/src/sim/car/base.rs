@@ -207,12 +207,14 @@ impl Car {
 
     /////////////////////////////
 
-    fn update_wheels(
-        &mut self,
-        rb: &mut RigidBody,
-        num_wheels_in_contact: usize,
-        forward_speed_uu: f32,
-    ) {
+    /// Ramp the handbrake and set the front wheels' steer angle.
+    ///
+    /// Split out of [`Self::update_wheels`] because it must run *before* the
+    /// wheel raycast: `apply_ray_cast` builds `axle_dir` from `steer_angle`,
+    /// and both the friction curve input in `update_wheels` and the friction
+    /// impulse itself are taken along that axle. Nothing here needs the
+    /// raycast, so the ordering costs nothing.
+    fn update_wheel_steering(&mut self, forward_speed_uu: f32) {
         let handbrake_delta = if self.state.controls.handbrake {
             drive_consts::POWERSLIDE_RISE_RATE
         } else {
@@ -220,6 +222,30 @@ impl Car {
         } * TICK_TIME;
         self.state.handbrake_val = (self.state.handbrake_val + handbrake_delta).clamp(0.0, 1.0);
 
+        let abs_forward_speed_uu = forward_speed_uu.abs();
+        let mut steer_angle = if self.config.three_wheels {
+            curves::STEER_ANGLE_FROM_SPEED_THREEWHEEL.get_output(abs_forward_speed_uu)
+        } else {
+            curves::STEER_ANGLE_FROM_SPEED.get_output(abs_forward_speed_uu)
+        };
+        if self.state.handbrake_val != 0.0 {
+            steer_angle += (curves::POWERSLIDE_STEER_ANGLE_FROM_SPEED
+                .get_output(abs_forward_speed_uu)
+                - steer_angle)
+                * self.state.handbrake_val;
+        }
+
+        steer_angle *= self.state.controls.steer;
+        self.bullet_vehicle.wheels[0].steer_angle = steer_angle;
+        self.bullet_vehicle.wheels[1].steer_angle = steer_angle;
+    }
+
+    fn update_wheels(
+        &mut self,
+        rb: &mut RigidBody,
+        num_wheels_in_contact: usize,
+        forward_speed_uu: f32,
+    ) {
         let mut real_brake = 0.0;
         let real_throttle = if self.state.controls.boost && self.state.boost > 0.0 {
             1.0
@@ -264,22 +290,6 @@ impl Car {
             wheel.engine_force = drive_engine_force;
             wheel.brake = drive_brake_force;
         }
-
-        let mut steer_angle = if self.config.three_wheels {
-            curves::STEER_ANGLE_FROM_SPEED_THREEWHEEL.get_output(abs_forward_speed_uu)
-        } else {
-            curves::STEER_ANGLE_FROM_SPEED.get_output(abs_forward_speed_uu)
-        };
-        if self.state.handbrake_val != 0.0 {
-            steer_angle += (curves::POWERSLIDE_STEER_ANGLE_FROM_SPEED
-                .get_output(abs_forward_speed_uu)
-                - steer_angle)
-                * self.state.handbrake_val;
-        }
-
-        steer_angle *= self.state.controls.steer;
-        self.bullet_vehicle.wheels[0].steer_angle = steer_angle;
-        self.bullet_vehicle.wheels[1].steer_angle = steer_angle;
 
         let car_pos = rb.get_world_pos();
         let car_vel = rb.lin_vel;
@@ -815,11 +825,23 @@ impl Car {
             self.state.controls = self.state.controls.clamp();
         }
 
+        // Forward speed is read before the raycast: `update_vehicle_first`
+        // borrows the world immutably and does not touch the body, so this is
+        // the same value either way, and the steer angle below needs it.
+        let forward_speed_uu =
+            collision_world.bodies()[self.rigid_body_idx].get_forward_speed() * BT_TO_UU;
+
+        // Steer first: the raycast derives each front wheel's axle direction
+        // from `steer_angle`, so setting it afterwards would steer the car
+        // along last tick's axle.
+        self.update_wheel_steering(forward_speed_uu);
+
         // Raycast the wheels against the world at the CURRENT transform so the
         // contact/suspension state is fresh for the impulse application below.
         // Mirrors the C++ `_PreTickUpdate` (which runs `updateVehicleFirst`
         // before the bullet step).
-        self.bullet_vehicle.update_vehicle_first(collision_world, TICK_TIME);
+        self.bullet_vehicle
+            .update_vehicle_first(collision_world, TICK_TIME);
 
         let num_wheels_in_contact = {
             let mut n = 0u8;
@@ -837,15 +859,23 @@ impl Car {
             n as usize
         };
 
-        let forward_speed_uu =
-            collision_world.bodies()[self.rigid_body_idx].get_forward_speed() * BT_TO_UU;
-
         let jump_pressed = self.state.controls.jump && !self.state.prev_controls.jump;
 
         {
             let rb = &mut collision_world.bodies_mut()[self.rigid_body_idx];
-
             self.update_wheels(rb, num_wheels_in_contact, forward_speed_uu);
+        }
+
+        // Now that this tick's friction coefficients, engine force and brake
+        // are set, turn the raycast geometry into per-wheel friction impulses.
+        // This has to happen before the jump/air-control impulses below, which
+        // are not accumulated and would otherwise change the contact velocity
+        // the friction reads.
+        self.bullet_vehicle
+            .update_vehicle_friction(collision_world, TICK_TIME);
+
+        {
+            let rb = &mut collision_world.bodies_mut()[self.rigid_body_idx];
 
             if self.state.is_on_ground {
                 self.state.is_flipping = false;
@@ -872,7 +902,8 @@ impl Car {
         // calls `updateVehicleSecond` here). Previously applied in
         // `post_tick_update` (after integration), which left the reported
         // velocity leading the position by one tick.
-        self.bullet_vehicle.update_vehicle_second(collision_world, TICK_TIME);
+        self.bullet_vehicle
+            .update_vehicle_second(collision_world, TICK_TIME);
 
         {
             let rb = &mut collision_world.bodies_mut()[self.rigid_body_idx];

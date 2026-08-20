@@ -12,6 +12,10 @@ pub struct VehicleRaycasterResult<'a> {
     pub hit_point_in_world: Vec3A,
     pub hit_normal_in_world: Vec3A,
     pub rigid_body: &'a RigidBody,
+    /// Index of the body that was hit. The reference above borrows the world,
+    /// so a wheel cannot hold on to it; the friction impulse is computed in a
+    /// later pass and needs to look the body up again.
+    pub ground_body_idx: usize,
 }
 
 pub struct VehicleRaycaster {
@@ -44,6 +48,7 @@ impl VehicleRaycaster {
                 if rb.has_contact_response() {
                     *result = Some(VehicleRaycasterResult {
                         rigid_body: rb,
+                        ground_body_idx: co_idx,
                         hit_point_in_world: ray_callback.hit_point_world[i],
                         hit_normal_in_world: ray_callback.hit_normal_world[i].normalize_or_zero(),
                     });

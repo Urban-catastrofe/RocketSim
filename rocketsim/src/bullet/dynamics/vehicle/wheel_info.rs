@@ -19,7 +19,12 @@ pub struct RaycastInfo {
     pub contact_normal: Vec3A,
     pub contact_point: Vec3A,
     pub suspension_length: f32,
+    /// Friction impulse for this wheel, filled in by
+    /// `VehicleRL::update_vehicle_friction` after the coefficients for this
+    /// tick are known. Zero until then.
     pub impulse: Vec3A,
+    /// The body the ray hit, for the deferred friction pass.
+    pub ground_body_idx: usize,
     pub is_in_contact_with_world: bool,
     pub clipped_inv_contact_dot_suspension: f32,
     pub suspension_relative_vel: f32,
@@ -166,19 +171,17 @@ impl WheelInfo {
             }
         }
 
-        let impulse = self.calc_friction_impulses(
-            chassis,
-            ray_results.rigid_body,
-            contact_normal,
-            contact_point,
-            time_step,
-        );
-
+        // The friction impulse is NOT computed here. It reads
+        // `lat_friction`, `long_friction`, `engine_force` and `brake`, all of
+        // which `Car::update_wheels` writes *after* this raycast pass runs, so
+        // computing it here would use last tick's coefficients. See
+        // `VehicleRL::update_vehicle_friction`.
         self.raycast_info = Some(RaycastInfo {
             contact_normal,
             contact_point,
             suspension_length,
-            impulse,
+            impulse: Vec3A::ZERO,
+            ground_body_idx: ray_results.ground_body_idx,
             is_in_contact_with_world,
             clipped_inv_contact_dot_suspension,
             suspension_relative_vel,
@@ -186,7 +189,7 @@ impl WheelInfo {
     }
 
     pub fn calc_friction_impulses(
-        &mut self,
+        &self,
         chassis: &RigidBody,
         ground_rb: &RigidBody,
         contact_normal: Vec3A,

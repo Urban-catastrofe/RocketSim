@@ -748,19 +748,69 @@ the *worst* step at a 0.03 budget, so a broad mean improvement does not move it.
   convex rather than linear. The ~3% excess at zero slip independently reproduces
   the `k_req` 1.030 that the probe method found over 13 000 ordinary driving
   samples, so it is real — it is just small.
-- *The port lags the friction coefficient by one tick.*
-  `calc_friction_impulses` runs inside `update_vehicle_first`, but
-  `wheel.lat_friction`, `wheel.steer_angle`, `wheel.engine_force` and
-  `wheel.brake` are all written by `Car::update_wheels`, which runs *after* it.
-  So the impulse applied on step `i -> i+1` uses `side_impulse` from the fresh
-  tick-`i` pose but a coefficient computed from the tick-`i-1` pose. Fitting
-  both alignments says Rocket League does **not** lag: median \|resid\| is 0.037
-  with the current tick against 0.064 with the previous one, and RL's own logged
-  `friction_curve_input` from the previous tick is worst at 0.074. Worth only
-  ~0.03 uu/s on this channel, but the same ordering also delays `engine_force`
-  and `brake`, which is a `drive_throttle` question rather than a lateral one.
-  Reordering the vehicle update is invasive and diverges from C++ RocketSim
-  deliberately, so it needs its own pass.
+- *The port lagged the friction coefficient by one tick.* **Fixed — see the
+  next section.** Fitting both alignments said Rocket League does **not** lag:
+  median \|resid\| 0.037 with the current tick against 0.064 with the previous
+  one, and RL's own logged `friction_curve_input` from the previous tick is
+  worst at 0.074.
+
+### The Vehicle Update Ran In The Wrong Order (-1.4%)
+
+Fixed 2026-08-20, acting on the lag the section above measured.
+
+`WheelInfo::calc_friction_impulses` used to be called from inside
+`apply_ray_cast`, i.e. from `update_vehicle_first`. It is a product of two
+things: the raycast geometry, which that pass produces, and four per-wheel
+coefficients — `lat_friction`, `long_friction`, `engine_force`, `brake` — which
+`Car::update_wheels` produces *afterwards*. So every friction impulse multiplied
+this tick's geometry by last tick's coefficients. C++ RocketSim does the same,
+and this is one of the few places where the port now deliberately diverges from
+it, because ground truth says Rocket League does not.
+
+There were two stale reads, not one. Besides the coefficients, `apply_ray_cast`
+derives each front wheel's `axle_dir` from `steer_angle`, which `update_wheels`
+also writes afterwards — and `update_wheels` then computes
+`friction_curve_input` along that same stale axle. So the *input* to the friction
+curve lagged as well as its output.
+
+**The fix is a reordering, in three parts:**
+
+1. The handbrake ramp and the steer angle moved out of `update_wheels` into a new
+   `Car::update_wheel_steering`, called *before* the raycast. Nothing in it needs
+   raycast results, so the move is free, and it makes `axle_dir` current.
+2. `apply_ray_cast` no longer computes the impulse. `RaycastInfo` gained
+   `ground_body_idx` so the hit body can be looked up again later (the
+   `&RigidBody` in the raycast result borrows the world and cannot be stored).
+3. A new `VehicleRL::update_vehicle_friction` runs after `update_wheels` and
+   fills in `RaycastInfo::impulse`.
+
+The placement of step 3 is load-bearing. It must run *after* `update_wheels`, so
+the coefficients are current, but *before* `update_jump` / `update_air_torque` /
+`update_auto_flip` / `update_auto_roll`, which add non-accumulated impulses and
+would otherwise change the contact velocity the friction reads. The sticky force
+inside `update_wheels` is safe to sit before it because it is applied with
+`accum = true`, which lands in `accum_lin_vel`, and `get_vel_in_local_point`
+reads only `lin_vel`.
+
+Result over the same 464 471 steps: suite mean **3.8056 -> 3.7512 uu/s
+(-1.43%)**, with every wheel-contact bucket improving and the two airborne ones
+bit-identical:
+
+| bucket | before | after | |
+|---|---|---|---|
+| `drive_handbrake` | 1.896 | 1.731 | -8.7% |
+| `drive_boost` | 1.704 | 1.615 | -5.2% |
+| `drive_coast` | 1.912 | 1.813 | -5.2% |
+| `wheel_transition` | 12.931 | 12.434 | -3.8% |
+| `drive_throttle` | 1.353 | 1.309 | -3.3% |
+| `wall_ceiling` | 6.411 | 6.295 | -1.8% |
+| `drive_partial` | 6.067 | 5.982 | -1.4% |
+| `air_free` / `air_boost` | 1.932 / 5.156 | 1.932 / 5.156 | unchanged, as they must be |
+
+`air_free` and `air_boost` are the sanity check again: no wheel contact means no
+friction impulse, so a change to friction ordering must not touch them. The gate
+goes 44 -> 45 passing with **no case regressing**
+(`car_ball_ball_hits_reversing_car` flips to passing).
 
 ### Lateral Wheel Friction Has No Coulomb Limit
 
