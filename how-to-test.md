@@ -270,6 +270,72 @@ input is a flip, so almost every airborne onset classifies as one, and the
 `car_double_jump_*` recordings put their second jump outside the measurable
 window. Re-record if double-jump accuracy matters.
 
+### Lateral Wheel Friction Has No Coulomb Limit
+
+The item long listed here as "the shared slip-friction curve" (powerslide
+under-brakes, drift over-brakes) is **not a miscalibrated curve**. Measured
+2026-08-20; the old framing should not be reused.
+
+`WheelRecord::friction_curve_input` is live — 912 368 non-zero samples across 126
+of the 424 files — and it is exactly the x-axis of `curves::LAT_FRICTION`.
+Recomputing the sim's own formula from recorded `rot`/`vel`/`ang_vel` reproduces
+it to mean |err| = 0.0017 over 4405 flat-ground back-wheel samples (0.000024 on
+pure-steer cases), so **the curve input is correct**. Like `susp_length` it lags
+position by one tick, which conveniently means the value recorded at `t+1` is the
+one RL used for the step `t → t+1`.
+
+The error turns out to be **independent of that input**: corr(|k−1|, fci) =
++0.027. Binning by `friction_curve_input` gives a misleading picture — bin by
+*absolute lateral slip speed* instead.
+
+How to measure it. On flat ground the world Δvel projected onto the car's right
+axis (`dLat`) is *purely* wheel lateral friction, and it is exactly linear in
+`lat_friction`: a two-point probe (temporarily scaling `lat_friction` by k = 1
+and k = 2) gives `dLat(k) = k·A + C` with C ≈ 0 (|C/dLat| < 0.02). So the
+required multiplier `k_req = (dLat_real − C)/A` is directly measurable per tick
+from a `RLDEEP` dump. Set `RLTICK` to half the recording length and
+`RLDEEP_RADIUS` to its full length to dump every tick.
+
+Handbrake off, flat ground, four wheels in contact:
+
+| mean lateral slip (UU/s) | n | `k_req` |
+|---|---|---|
+| < 256 | 1856 | **1.000** |
+| 256–512 | 72 | 0.532 |
+| 512–1024 | 32 | 0.256 |
+
+`lat_speed × k_req` is 181 / 192 / 185 across the top three bins: RL's lateral
+force **peaks somewhere around 130–260 UU/s of slip and then declines**, while
+the sim's grows monotonically without bound. The cause is structural —
+`resolve_single_bilateral` cancels lateral contact velocity with no
+Coulomb/normal-force limit, so nothing caps the force. Below the peak the sim is
+exact, so `LAT_FRICTION` and the 0.1 handbrake factor are both correctly
+calibrated for the regime they were fit to; only the unbounded tail is wrong.
+
+**This is the same root cause as the load-scaling defect** the suspension-ray fix
+exposed (`car_boost_then_jump` 6.59 → 14.37 UU/s). No wheel force is tied to
+normal force anywhere. Treat them as one item.
+
+A second, separate defect sits in the same code: with handbrake engaged and
+lateral slip **below** ~128 UU/s the sim is ~4× too weak (`k_req` 3.7–4.8),
+while at ≥ 128 UU/s it is exact (`k_req` 1.000 out to 2048 UU/s — the ×0.1 keeps
+it under the cap). The implied handbrake lateral factor is ~0.37 at low slip
+against the constant 0.10 in use, and
+`curves::HANDBRAKE_LAT_FRICTION_FACTOR` is a `LinearPieceCurve<1>` — a single
+point — where every sibling curve has two or more.
+
+Both are **faithful to C++**: `RLConst.h:483` really does define
+`HANDBRAKE_LAT_FRICTION_FACTOR_CURVE = {{0, 0.1f}}`, and
+`btVehicleRL.cpp:306 calcFrictionImpulses` has no cap either. These are upstream
+modelling gaps, not Rust port slips — don't go hunting for a transcription error.
+
+Unexplored ground truth found alongside: `WheelRecord::spin_speed` is **live**
+(non-zero in 97.9% of wheel samples) and physically sensible — it tracks forward
+speed, keeps spinning while airborne, and holds a steady ~1.122 ratio between a
+side's front and back wheel. RL tracks wheel angular velocity; the sim has no
+wheel-spin state at all. `lat_friction`, `long_friction`, `engine_force` and
+`steer_amount` are the genuinely dead fields.
+
 ## The Accuracy Bar
 
 A case **passes** when no single simulated step diverges from the recording by
@@ -335,13 +401,20 @@ and 0.340%). The companion `wheel_count |dn|` figure on the STATE timers line
 gives the magnitude.
 
 The comparison is per **pair** (front count, back count), not an exact four-bit
-mask, because the recording's left/right order within a pair cannot be pinned
-down: `{0,2}` and `{1,3}` are the two common side-lift masks in near-equal
-numbers (3148 vs 3108), `steer_amount` is never populated so the front pair
-cannot be identified from it, and the sim's own `right_dir_2d` naming
-contradicts the right-handed forward/up convention. Front/back grouping *is*
-certain, and a per-pair count is what `n >= 3` turns on. A left/right lift swap
-is the one blind spot.
+mask, because when the channel was built the recording's left/right order within
+a pair could not be pinned down: `{0,2}` and `{1,3}` are the two common side-lift
+masks in near-equal numbers (3148 vs 3108) and `steer_amount` is never populated,
+so the front pair cannot be identified from it. Front/back grouping *is* certain,
+and a per-pair count is what `n >= 3` turns on, so a left/right lift swap was the
+one blind spot.
+
+That blind spot is now closed. The `ang_vel × wheel_delta` term in the
+`friction_curve_input` formula breaks the left/right symmetry, and recomputing
+fci for the back pair under both assignments separates them 25:1 (mean |err|
+0.0025 vs 0.0625 on `car_powerslide`): **wheel index 2 is the −y side and index 3
+the +y side**, with back offset x = −33.75, |y| = 29.50, z = 20.755. Tightening
+`wheels_contact` to an exact four-bit mask is therefore possible; it has not been
+done yet.
 
 ## Reading a Report Line
 

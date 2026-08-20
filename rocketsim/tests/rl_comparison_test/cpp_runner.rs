@@ -210,7 +210,9 @@ fn set_cpp_state_to_record_tick_impl(
             cs.jump_time = rocketsim::consts::TICK_TIME;
         }
 
-        // RLPR has no per-wheel contact; derive it from is_on_ground.
+        // Derived from is_on_ground. RLPR *does* carry per-wheel contact in
+        // `WheelRecord::has_contact`, but this restore is inert either way -
+        // `pre_tick_update` recomputes it from the raycast. See runner.rs.
         cs.wheels_with_contact = if cs.is_on_ground {
             [true; 4]
         } else {

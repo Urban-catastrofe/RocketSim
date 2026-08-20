@@ -199,10 +199,14 @@ pub fn set_state_to_record_tick(
             cs.jump_time = rocketsim::consts::TICK_TIME;
         }
 
-        // The RLPR format doesn't store per-wheel contact state, but the
-        // sim derives is_on_ground from wheels_with_contact at step start.
-        // Without this, the step function overwrites our restored is_on_ground
-        // with stale contact data from the previous sim tick.
+        // Derived from `is_on_ground` rather than from the recording, even
+        // though `WheelRecord::has_contact` does carry the real per-wheel flags
+        // (an earlier comment here claimed otherwise). Either way the restore is
+        // inert: `pre_tick_update` recomputes `wheels_with_contact` and
+        // `is_on_ground` from the raycast unconditionally before they are read.
+        // It is kept only so the restored state is self-consistent for anything
+        // that inspects it before the first step. The recorded flags are
+        // compared against the sim as the `wheels_contact` state channel.
         cs.wheels_with_contact = if cs.is_on_ground {
             [true; 4]
         } else {
