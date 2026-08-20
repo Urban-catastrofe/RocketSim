@@ -9,7 +9,7 @@
 
 use glam::Vec3A;
 use rocketsim::consts::TICK_TIME;
-use rocketsim::consts::car::jump;
+use rocketsim::consts::car::{drive, jump};
 
 use super::tick_record::TickRecord;
 
@@ -204,6 +204,74 @@ pub fn normalize_jump_active(ticks: &mut [TickRecord], num_cars: usize) -> usize
     changed
 }
 
+/// Rebuild `handbrake_val` from the handbrake *button*, and report how many
+/// (tick, car) pairs changed.
+///
+/// The observer stores this field as the button state snapped to 0 or 1 - in
+/// `car_drift_powerslide_turn` it drops from 1 to 0 within a single tick - but
+/// Rocket League ramps it, exactly as the sim does in `Car::update_wheels`, at
+/// `POWERSLIDE_RISE_RATE` up and `POWERSLIDE_FALL_RATE` down.
+///
+/// The ramp is directly measurable. On the closed lateral axis (see
+/// `latdump`) the lateral friction factor Rocket League
+/// applies after a release climbs by 0.0150 per tick for the full 60 ticks,
+/// against a predicted `0.9 * POWERSLIDE_FALL_RATE / 120` = 0.0150; fitting the
+/// factor itself off the rebuilt ramp returns 0.1023 against the shipped
+/// `HANDBRAKE_LAT_FRICTION_FACTOR` of 0.1.
+///
+/// Restoring the snapped value drives the sim to full lateral grip where the game
+/// still had almost none, and it is the largest single error on that channel:
+/// mean `|sim - RL|` over the affected steps is 6.34 uu/s on the release side and
+/// 6.45 on the press side, against 0.77 and 0.68 once the ramp is rebuilt. Where
+/// the ramp is settled the snapped and rebuilt values agree exactly and the
+/// channel is already accurate to 0.006 uu/s - so the ramp is the whole defect,
+/// and the friction constants underneath it were never wrong.
+///
+/// This also explains why `RLCENSUS=3` never produced an `hb-ramp` band: the
+/// field it bands on only ever held 0 or 1. That was a property of the log rather
+/// than of Rocket League, and it had been read as evidence that
+/// `POWERSLIDE_RISE_RATE` was not involved in anything.
+///
+/// `prev_controls` is the input applied over the step *into* a tick, and
+/// `update_wheels` increments before it reads, so the value stored at tick `t` is
+/// the state the sim must be restored to before stepping out of `t`. Only 120 Hz
+/// recordings get this far, so one array entry is one tick.
+pub fn normalize_handbrake_val(ticks: &mut [TickRecord], num_cars: usize) -> usize {
+    // A recording can open mid-slide, and the snapped log is the only evidence
+    // available for where the ramp already was.
+    let mut val: Vec<f32> = (0..num_cars)
+        .map(|car| {
+            ticks
+                .first()
+                .and_then(|tick| tick.car_records.get(car))
+                .map_or(0.0, |rec| rec.handbrake_val)
+        })
+        .collect();
+    let mut changed = 0;
+
+    for (t, tick) in ticks.iter_mut().enumerate() {
+        for (car, value) in val.iter_mut().enumerate() {
+            let Some(rec) = tick.car_records.get_mut(car) else {
+                continue;
+            };
+            if t > 0 {
+                let rate = if rec.prev_controls.handbrake {
+                    drive::POWERSLIDE_RISE_RATE
+                } else {
+                    -drive::POWERSLIDE_FALL_RATE
+                };
+                *value = (*value + rate * TICK_TIME).clamp(0.0, 1.0);
+            }
+            if *value != rec.handbrake_val {
+                rec.handbrake_val = *value;
+                changed += 1;
+            }
+        }
+    }
+
+    changed
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::cpp_records::{CarRecord, PhysRecord};
@@ -299,6 +367,102 @@ mod tests {
             vec![true, false, false, false],
             "only a grounded pulse may arm the sustained flag"
         );
+    }
+
+    /// Build a one-car tick from `(handbrake button, logged handbrake_val)`.
+    fn hb_tick(cars: &[(bool, f32)]) -> TickRecord {
+        let car_records = cars
+            .iter()
+            .map(|&(held, logged)| {
+                let mut rec: CarRecord = unsafe { std::mem::zeroed() };
+                rec.prev_controls.handbrake = held;
+                rec.handbrake_val = logged;
+                rec
+            })
+            .collect();
+        TickRecord {
+            car_records,
+            ball_record: unsafe { std::mem::zeroed::<PhysRecord>() },
+        }
+    }
+
+    fn run_hb(rows: &[(bool, f32)]) -> Vec<f32> {
+        let mut ticks: Vec<TickRecord> = rows.iter().map(|r| hb_tick(&[*r])).collect();
+        normalize_handbrake_val(&mut ticks, 1);
+        ticks
+            .iter()
+            .map(|t| t.car_records[0].handbrake_val)
+            .collect()
+    }
+
+    /// The log snaps to 0 on release; the rebuilt value has to decay at
+    /// `POWERSLIDE_FALL_RATE`, which is what Rocket League measurably does.
+    #[test]
+    fn release_decays_at_fall_rate() {
+        let got = run_hb(&[(true, 1.0), (false, 0.0), (false, 0.0), (false, 0.0)]);
+        let step = drive::POWERSLIDE_FALL_RATE * TICK_TIME;
+        assert_eq!(got[0], 1.0, "the seed is the logged value at tick 0");
+        for (i, v) in got.iter().enumerate().skip(1) {
+            let want = 1.0 - step * i as f32;
+            assert!((v - want).abs() < 1e-6, "tick {i}: {v} != {want}");
+        }
+    }
+
+    /// The log snaps to 1 on press; the rebuilt value has to rise at
+    /// `POWERSLIDE_RISE_RATE` and clamp there.
+    #[test]
+    fn press_rises_at_rise_rate_and_clamps() {
+        let rows: Vec<(bool, f32)> = std::iter::once((false, 0.0))
+            .chain(std::iter::repeat_n((true, 1.0), 40))
+            .collect();
+        let got = run_hb(&rows);
+        let step = drive::POWERSLIDE_RISE_RATE * TICK_TIME;
+        assert!(
+            (got[1] - step).abs() < 1e-6,
+            "first held tick is one step up"
+        );
+        assert!(got[10] < 1.0, "still ramping after 10 ticks");
+        assert_eq!(got[40], 1.0, "clamped at 1 once the ramp completes");
+    }
+
+    /// A tap shorter than the rise time never reaches full powerslide, which is
+    /// the whole reason the snapped log is wrong for real play.
+    #[test]
+    fn short_tap_never_reaches_full() {
+        let got = run_hb(&[
+            (false, 0.0),
+            (true, 1.0),
+            (true, 1.0),
+            (false, 0.0),
+            (false, 0.0),
+        ]);
+        let up = drive::POWERSLIDE_RISE_RATE * TICK_TIME;
+        let down = drive::POWERSLIDE_FALL_RATE * TICK_TIME;
+        assert!((got[2] - 2.0 * up).abs() < 1e-6, "two ticks of rise only");
+        assert!((got[4] - (2.0 * up - 2.0 * down)).abs() < 1e-6);
+        assert!(
+            got.iter().all(|&v| v < 1.0),
+            "a 2-tick tap cannot reach 1.0"
+        );
+    }
+
+    /// Never leaves the valid range, however long the button is held either way.
+    #[test]
+    fn stays_within_range() {
+        let rows: Vec<(bool, f32)> = std::iter::repeat_n((false, 0.0), 200).collect();
+        assert!(run_hb(&rows).iter().all(|&v| (0.0..=1.0).contains(&v)));
+    }
+
+    /// Cars ramp independently.
+    #[test]
+    fn handbrake_cars_are_independent() {
+        let mut ticks = vec![
+            hb_tick(&[(true, 1.0), (false, 0.0)]),
+            hb_tick(&[(true, 1.0), (false, 0.0)]),
+        ];
+        normalize_handbrake_val(&mut ticks, 2);
+        assert_eq!(ticks[1].car_records[0].handbrake_val, 1.0);
+        assert_eq!(ticks[1].car_records[1].handbrake_val, 0.0);
     }
 
     /// Cars are tracked independently.

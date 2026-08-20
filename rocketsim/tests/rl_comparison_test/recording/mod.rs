@@ -160,8 +160,11 @@ impl Recording {
                 ),
             ));
         }
-        // Needs `stride`, so it runs after the rate check. Uses positions and
-        // velocities only, which `normalize_jump_active` does not touch.
+        // Both of these need the 120 Hz guarantee above: one array entry has to
+        // be one physics tick for the ramp integration and for the position
+        // identity to mean anything. They read `prev_controls`, positions and
+        // velocities, none of which `normalize_jump_active` touches.
+        normalize::normalize_handbrake_val(&mut ticks, num_cars);
         let bump_onsets = normalize::detect_bump_onsets(&ticks, num_cars, stride);
 
         Ok(Self {

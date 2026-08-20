@@ -21,7 +21,9 @@ mod cpp_runner;
 mod deep_dive;
 #[allow(dead_code)]
 mod diagnose;
+mod flat_floor;
 mod impulse_window;
+mod latdump;
 mod measure;
 mod recording;
 mod report;
@@ -66,6 +68,13 @@ fn test_recording(recording: &Recording) {
     // the suspension study (see suspdump.rs).
     if std::env::var("RLSUSPDUMP").is_ok() {
         suspdump::analyze(recording);
+        return;
+    }
+
+    // RLLATDUMP=1: dump the measured lateral friction impulse on flat-floor
+    // steps for the wheel friction study (see latdump.rs).
+    if std::env::var("RLLATDUMP").is_ok() {
+        latdump::analyze(recording);
         return;
     }
 

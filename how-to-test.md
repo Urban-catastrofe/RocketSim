@@ -388,8 +388,9 @@ window. Re-record if double-jump accuracy matters.
 ### Where The Car Error Actually Lives (RLCENSUS)
 
 `RLSEG` splits error by situation but only reports means, and the car velocity
-mean (4.78 uu/s) is heavy-tailed enough that a mean per regime says almost
-nothing: grounded and airborne come out at 4.90 and 4.58 with rms 28 and 33.
+mean is heavy-tailed enough that a mean per regime says almost nothing: grounded
+and airborne came out at 4.90 and 4.58 with rms 28 and 33, measured when the
+suite mean was 4.78.
 `RLCENSUS=1` files every step into exactly one bucket named after its *cause*
 and reports the error **mass** (sum of \|err\|) per bucket, so buckets can be
 ranked by how much of the total they own.
@@ -399,22 +400,29 @@ It is the same measurement as the gate, not a parallel one: it reuses
 gate's to four decimals (4.7793 vs 4.7800 over 464 471 steps). If those ever
 diverge, the census filters have drifted from the runner's.
 
-Suite-wide, 2026-08-20 (`b08d236`), excluding the 1.3% of steps the gate skips as
-unmeasurable impulse windows:
+Suite-wide, 2026-08-20, after the handbrake-ramp fix (suite mean 3.8056 uu/s),
+excluding the 1.3% of steps the gate skips as unmeasurable impulse windows:
 
-| bucket | steps | mean | p50 | p99 | % of mass |
-|---|---|---|---|---|---|
-| `car_proximity` | 4.0% | 25.76 | 1.75 | 445 | 21.8% |
-| `drive_throttle` | 27.5% | 2.66 | 0.69 | 33 | 15.3% |
-| `wall_ceiling` | 7.4% | 8.55 | 2.96 | 72 | 13.2% |
-| `air_boost` | 11.1% | 5.17 | 0.51 | 197 | 12.0% |
-| `air_free` | 27.8% | 1.94 | 0.04 | 17 | 11.3% |
-| `drive_handbrake` | 2.7% | 10.63 | 8.05 | 51 | 6.0% |
-| `drive_boost` | 9.7% | 2.42 | 1.23 | 21 | 4.9% |
-| `ball_contact` | 1.3% | 16.13 | 2.53 | 166 | 4.4% |
-| `drive_partial` | 2.6% | 7.54 | 4.40 | 46 | 4.0% |
-| `drive_coast` | 4.8% | 3.66 | 1.40 | 29 | 3.7% |
-| `wheel_transition` | 1.1% | 14.64 | 5.25 | 223 | 3.4% |
+| bucket | steps | mean | % of mass |
+|---|---|---|---|
+| `car_proximity` | 4.0% | 25.21 | 26.7% |
+| `air_boost` | 11.1% | 5.16 | 15.0% |
+| `air_free` | 27.8% | 1.93 | 14.1% |
+| `wall_ceiling` | 7.4% | 6.41 | 12.5% |
+| `drive_throttle` | 23.5% | 1.35 | 8.3% |
+| `ball_contact` | 1.3% | 15.52 | 5.4% |
+| `drive_handbrake` | 8.2% | 1.90 | 4.1% |
+| `drive_partial` | 2.6% | 6.07 | 4.1% |
+| `drive_boost` | 8.9% | 1.70 | 4.0% |
+| `wheel_transition` | 1.1% | 12.93 | 3.7% |
+| `drive_coast` | 4.2% | 1.91 | 2.1% |
+
+The bucket *membership* changed with that fix as well as the means: a step counts
+as `drive_handbrake` when `handbrake_val > 0`, and rebuilding the ramp moved
+18 685 mid-ramp steps out of `drive_throttle`, which is most of why that bucket
+fell from 2.66 to 1.35. Per-bucket p50/p99 are not pooled here because the census
+reports them per recording; the pre-fix values were `car_proximity` 1.75/445,
+`drive_throttle` 0.69/33, `air_free` 0.04/17, `air_boost` 0.51/197.
 
 Read p50 against mean, not mean alone. `air_free` and `air_boost` have p50 0.04
 and 0.51 — free flight is essentially exact and their mass is entirely a 1-2%
@@ -446,17 +454,25 @@ not re-spend effort on them:
   step's controls. Offset 0 wins on every bucket and on both groups
   (match mean 5.13 vs 5.46 at -1 and 8.08 at +1), so the harness's assumption —
   tick `T`'s `prev_controls` drove the step `T-1 -> T` — is correct.
-- *Handbrake mid-ramp ticks.* Real play taps the handbrake, so `POWERSLIDE_RISE_RATE`
-  could have been implicated. `RLCENSUS=3` produces no `hb-ramp` band at all:
-  recorded `handbrake_val` is only ever 0 or 1.
+The third hypothesis on this list was *not* refuted — it was the cause, and the
+refutation was wrong for an instructive reason:
 
-What is left is that the match recordings simply visit harder parts of the input
-space. `RLCENSUS=3` shows the handbrake error rising monotonically with speed
-(p50 0.98 / 3.32 / 8.19 / 9.68 / 10.73 across the five speed bands) while every
-scripted powerslide recording sits at 94-1318 uu/s median. The lateral
-`magbias` (\|sim.axis\| - \|game.axis\|, which unlike a signed bias does not cancel
-between left and right slides) accounts for essentially the whole bucket:
-+11.37 against a p50 of 10.73 at 1.8k+. The sim keeps too much lateral speed.
+- *Handbrake mid-ramp ticks.* Real play taps the handbrake, so
+  `POWERSLIDE_RISE_RATE` could have been implicated. This was dismissed because
+  `RLCENSUS=3` produced no `hb-ramp` band at all: recorded `handbrake_val` is
+  only ever 0 or 1. **That is a property of the observer, not of Rocket
+  League.** The field is logged as the button state; the game ramps the real one.
+  A census banded on a field the log cannot represent will always report the
+  band as empty, which reads exactly like evidence of absence. See the next
+  section — fixing it was worth 17% of the whole suite error, and it explains
+  both match-specific rows in the table above.
+
+The handbrake and coast buckets were also the two the scripted-vs-match split
+flagged as recording-style artefacts, which was the right read: match play taps
+the handbrake constantly, so it lives mid-ramp, while a scripted powerslide holds
+the button and spends almost all of its ticks settled. The lateral `magbias`
+of +11.37 against a p50 of 10.73 at 1.8k+ — "the sim keeps too much lateral
+speed" — was the sim snapping to full grip where the game was still sliding.
 
 That is consistent with — and does not supersede — the bimodality result in
 *Lateral Wheel Friction Has No Coulomb Limit* below. The census measures total
@@ -625,11 +641,141 @@ Two further traps worth knowing, both of which produced wrong answers first:
   *rising* surface, which fakes a fast-extending suspension; that gate is what
   rejects them.
 
+### The Handbrake Ramp Is Not In The Recording (RLLATDUMP)
+
+Measured 2026-08-20. **Worth 17% of the whole suite error, and it was a harness
+defect rather than a physics one.**
+
+`CarRecord::handbrake_val` is written by the observer as the handbrake *button*,
+snapped to 0 or 1 — in `car_drift_powerslide_turn` it drops from 1 to 0 inside a
+single tick. Rocket League ramps it, exactly as `Car::update_wheels` does, at
+`POWERSLIDE_RISE_RATE` = 5.0 up and `POWERSLIDE_FALL_RATE` = 2.0 down.
+`set_state_to_record_tick` restored the snapped value, so the sim jumped to full
+lateral grip on the tick the button came up while the game still had almost none
+— and stayed wrong for the 60 ticks the ramp takes to run out.
+
+**The method generalises the suspension one to a second axis.** On a flat floor
+with an upright car, the body right axis projected into the contact plane carries
+*only* lateral wheel friction. Gravity and the sticky force act along the contact
+normal (the sticky direction is the normalised sum of the wheel contact normals,
+so on a flat floor it is exactly `+z`); `calc_friction_impulses` builds
+`forward_dir = normal x axle_dir`, so the engine force, the brake and the whole
+longitudinal friction term are exactly perpendicular to the axle *provided the
+front and back axles coincide*, which needs `steer_angle == 0`; boost acts along
+body forward and is subtracted explicitly; and the car body has zero linear
+damping. So
+
+```text
+dv_lat = (vel[i+1] - vel[i]) . axle - boost_dv * (forward . axle)
+```
+
+is Rocket League's own lateral friction impulse, with no simulation involved. The
+sim model for it is only *two* parameters, because `curves::LAT_FRICTION` is the
+two-point curve `[(0, 1.0), (1, 0.2)]`:
+
+```text
+dv_lat = (1 + (h - 1) * handbrake_val) * sum_w q_w * mu(x_w),   mu(x) = a + b * x
+q_w    = BT_TO_UU * dt / 3 * side_impulse_w
+```
+
+`RLLATDUMP=1` emits one row per usable step (28 313 steps over 165 recordings);
+the row format is documented in `latdump.rs`. Restricting to `steer == 0` costs
+most of the hard-cornering population, so this measures the curve and the
+handbrake factor, not cornering.
+
+**The ramp is measured, not inferred.** In `car_drift_powerslide_turn` the button
+and the logged `handbrake_val` both drop to 0 at tick 100, but the implied
+friction factor (RL divided by the wheel sum) climbs steadily afterwards:
+
+| tick | 101 | 102 | 103 | 104 | 105 |
+|---|---|---|---|---|---|
+| implied factor | 0.1339 | 0.1489 | 0.1640 | 0.1789 | 0.1939 |
+
+That is +0.0150 per tick, every tick, against a predicted
+`0.9 * POWERSLIDE_FALL_RATE / 120` = 0.0150. Rebuilding the ramp by integrating
+the button and then fitting the handbrake factor off it — a coefficient the
+reconstruction was not fitted to — returns **0.1023** against the shipped
+`HANDBRAKE_LAT_FRICTION_FACTOR` of 0.1. Both ramp rates check out separately, so
+neither constant is absorbing the other:
+
+| population | rows | mean \|err\| logged | mean \|err\| rebuilt |
+|---|---|---|---|
+| release side (`FALL_RATE` 2.0) | 1341 | 6.34 | **0.77** |
+| press side (`RISE_RATE` 5.0) | 300 | 6.45 | **0.68** |
+| ramp settled, either end | 10 523 | identical | 0.006–0.056 |
+
+Where the ramp is settled the two agree exactly and the channel is already
+accurate to 0.006 uu/s — so the ramp was the whole defect and the friction
+constants underneath it were never wrong.
+
+**The fix** is `normalize::normalize_handbrake_val`, which rebuilds the field at
+load time by integrating `prev_controls.handbrake`. It belongs in `normalize.rs`
+rather than in `runner.rs` for the reason that module exists: the observer and the
+sim mean different things by the field, and every consumer — gate, census, deep
+dive, rollout, C++ side-by-side — needs the same interpretation. Note that
+`compare.rs` already excluded `handbrake_val` from comparison for exactly this
+reason; the gap was that it was still being *restored*.
+
+Result over 464 471 measured car steps: suite mean **4.5892 -> 3.8056 uu/s
+(-17.1%)**, and no bucket regressed:
+
+| bucket | before | after | |
+|---|---|---|---|
+| `drive_handbrake` | 10.50 | 1.90 | **-81.9%** (n 12 579 -> 38 249) |
+| `drive_throttle` | 2.58 | 1.35 | **-47.5%** (18 685 mid-ramp steps moved out) |
+| `drive_coast` | 3.29 | 1.91 | -42.0% |
+| `drive_partial` | 7.32 | 6.07 | -17.1% |
+| `drive_boost` | 2.20 | 1.70 | -22.7% |
+| `wall_ceiling` | 7.20 | 6.41 | -11.0% |
+| `wheel_transition` | 14.45 | 12.93 | -10.5% |
+| `air_free` / `air_boost` | 1.932 / 5.156 | 1.932 / 5.156 | unchanged, as they must be |
+
+`air_free` and `air_boost` coming out bit-identical is the sanity check: there is
+no handbrake in the air. On the lateral channel itself, mean \|sim - RL\| over live
+rows falls 1.306 -> 0.549 and p90 3.700 -> 1.150.
+
+The gate reads 44 passed / 392 failed against 39 / 392 before, but the five extra
+passes are this section's new unit tests — **no case flipped**. The gate hard-gates
+the *worst* step at a 0.03 budget, so a broad mean improvement does not move it.
+
+**Two smaller things this measurement also settles, neither acted on:**
+
+- *The shipped curve is very nearly right.* Fitting the endpoints on the
+  handbrake-released rows gives `LAT_FRICTION(0)` = 1.028 and `LAT_FRICTION(1)` =
+  0.202 against 1.0 and 0.2. Fitting one free `mu` per slip-ratio bin shows RL
+  sitting slightly *above* the shipped straight line in the middle (0.751 vs
+  0.680 at x ~ 0.4, the largest gap anywhere), so the true curve is gently
+  convex rather than linear. The ~3% excess at zero slip independently reproduces
+  the `k_req` 1.030 that the probe method found over 13 000 ordinary driving
+  samples, so it is real — it is just small.
+- *The port lags the friction coefficient by one tick.*
+  `calc_friction_impulses` runs inside `update_vehicle_first`, but
+  `wheel.lat_friction`, `wheel.steer_angle`, `wheel.engine_force` and
+  `wheel.brake` are all written by `Car::update_wheels`, which runs *after* it.
+  So the impulse applied on step `i -> i+1` uses `side_impulse` from the fresh
+  tick-`i` pose but a coefficient computed from the tick-`i-1` pose. Fitting
+  both alignments says Rocket League does **not** lag: median \|resid\| is 0.037
+  with the current tick against 0.064 with the previous one, and RL's own logged
+  `friction_curve_input` from the previous tick is worst at 0.074. Worth only
+  ~0.03 uu/s on this channel, but the same ordering also delays `engine_force`
+  and `brake`, which is a `drive_throttle` question rather than a lateral one.
+  Reordering the vehicle update is invasive and diverges from C++ RocketSim
+  deliberately, so it needs its own pass.
+
 ### Lateral Wheel Friction Has No Coulomb Limit
 
 The item long listed here as "the shared slip-friction curve" (powerslide
 under-brakes, drift over-brakes) is **not a miscalibrated curve**. Measured
 2026-08-20; the old framing should not be reused.
+
+> **Superseded in part.** This section predates the closed-axis measurement in
+> the section above, and its central open question — the bimodal handbrake
+> residual — is now answered: the discrete state difference it correctly
+> identified was the unlogged `handbrake_val` ramp. Its conclusions about the
+> *curve* still stand and are independently confirmed (the ~3% excess at low
+> slip shows up in both methods). Treat the probe method here as history: a
+> "required multiplier" absorbs every other error on the step, which is what made
+> the residual look unexplainable by any available predictor.
 
 `WheelRecord::friction_curve_input` is live — 912 368 non-zero samples across 126
 of the 424 files — and it is exactly the x-axis of `curves::LAT_FRICTION`.
@@ -691,6 +837,13 @@ the available predictors explains it: fci (R² = 0.05), lateral slip speed, norm
 load, wheel-spin longitudinal slip (R² = 0.048), throttle sign, boost,
 supersonic, wheel count, or steering (the best discrete separator, `|steer| = 1`,
 only splits 0.79 vs 0.44).
+
+**This is now solved, and the reasoning above was right.** The discrete state was
+the true `handbrake_val`: the sim ran at the settled factor 0.1 while the game was
+mid-ramp somewhere between 0.1 and 1.0, which is a ratio of up to 10x and a median
+near 5. It resisted every predictor because the predictor that explains it was not
+in the recording at all. p25 = 1.0 is the settled population; the ~5x mode is the
+ramp. See "The Handbrake Ramp Is Not In The Recording" above.
 
 Above fci 0.3 with handbrake the sim is **exact**, and this is what validates the
 whole method: the measurement recovers the sim's own `HANDBRAKE_LAT_FRICTION_FACTOR`
@@ -838,6 +991,7 @@ order/quantization, often acceptable.
 | `RLSEG` | `1` to also print per-situation breakdowns | off |
 | `RLCENSUS` | `1` error-mass census by cause; `2` also lists each bucket's worst steps; `3` sub-bands by speed + handbrake state; `4` by `friction_curve_input`; `5` by suspension compression; `6` by compression x compression rate; `7` 1-UU compression bands with a quiet suspension | off |
 | `RLCTRLOFF` | shift which tick the census reads controls from (`-1`/`0`/`+1`), to re-verify control alignment | `0` |
+| `RLLATDUMP` | `1` to emit one `LATROW` per flat-floor zero-steer step: RL's own lateral friction impulse and the sim's, with per-wheel slip ratio and side impulse. See `latdump.rs` | off |
 | `RLSUSPDUMP` | `1` to emit one `SUSPROW` per flat-floor step: RL's own suspension impulse and the sim's, with per-wheel compression and rate. See `suspdump.rs` | off |
 | `RLTHREADS` | worker threads for the per-tick pass | all cores (≤16) |
 | `RLCONT` | `1` to also run the sequential continuous (compounding) pass | off |
