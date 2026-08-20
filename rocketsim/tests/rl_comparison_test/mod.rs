@@ -13,6 +13,7 @@ use crate::rl_comparison_test::recording::Recording;
 use std::sync::OnceLock;
 
 mod car_order;
+mod census;
 mod compare;
 mod config;
 #[cfg(feature = "cpp-compare")]
@@ -48,6 +49,15 @@ fn test_recording(recording: &Recording) {
     // RLDIAG=1: dump recording events (teleports/demos) instead of measuring.
     if std::env::var("RLDIAG").is_ok() {
         diagnose::dump_events(recording);
+        return;
+    }
+
+    // RLCENSUS=1..4: error-mass census by cause (see census.rs).
+    if matches!(
+        std::env::var("RLCENSUS").as_deref(),
+        Ok("1") | Ok("2") | Ok("3") | Ok("4") | Ok("true")
+    ) {
+        census::analyze(recording);
         return;
     }
 

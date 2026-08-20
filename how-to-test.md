@@ -385,6 +385,106 @@ input is a flip, so almost every airborne onset classifies as one, and the
 `car_double_jump_*` recordings put their second jump outside the measurable
 window. Re-record if double-jump accuracy matters.
 
+### Where The Car Error Actually Lives (RLCENSUS)
+
+`RLSEG` splits error by situation but only reports means, and the car velocity
+mean (4.78 uu/s) is heavy-tailed enough that a mean per regime says almost
+nothing: grounded and airborne come out at 4.90 and 4.58 with rms 28 and 33.
+`RLCENSUS=1` files every step into exactly one bucket named after its *cause*
+and reports the error **mass** (sum of \|err\|) per bucket, so buckets can be
+ranked by how much of the total they own.
+
+It is the same measurement as the gate, not a parallel one: it reuses
+`has_discontinuity` and `is_car_sentinel`, and its measurable mean reproduces the
+gate's to four decimals (4.7793 vs 4.7800 over 464 471 steps). If those ever
+diverge, the census filters have drifted from the runner's.
+
+Suite-wide, 2026-08-20 (`b08d236`), excluding the 1.3% of steps the gate skips as
+unmeasurable impulse windows:
+
+| bucket | steps | mean | p50 | p99 | % of mass |
+|---|---|---|---|---|---|
+| `car_proximity` | 4.0% | 25.76 | 1.75 | 445 | 21.8% |
+| `drive_throttle` | 27.5% | 2.66 | 0.69 | 33 | 15.3% |
+| `wall_ceiling` | 7.4% | 8.55 | 2.96 | 72 | 13.2% |
+| `air_boost` | 11.1% | 5.17 | 0.51 | 197 | 12.0% |
+| `air_free` | 27.8% | 1.94 | 0.04 | 17 | 11.3% |
+| `drive_handbrake` | 2.7% | 10.63 | 8.05 | 51 | 6.0% |
+| `drive_boost` | 9.7% | 2.42 | 1.23 | 21 | 4.9% |
+| `ball_contact` | 1.3% | 16.13 | 2.53 | 166 | 4.4% |
+| `drive_partial` | 2.6% | 7.54 | 4.40 | 46 | 4.0% |
+| `drive_coast` | 4.8% | 3.66 | 1.40 | 29 | 3.7% |
+| `wheel_transition` | 1.1% | 14.64 | 5.25 | 223 | 3.4% |
+
+Read p50 against mean, not mean alone. `air_free` and `air_boost` have p50 0.04
+and 0.51 — free flight is essentially exact and their mass is entirely a 1-2%
+tail, so there is no air-physics coefficient to chase. `drive_throttle` is the
+sim's best broad regime (p50 0.69, flat across every speed band). The buckets
+worth attention are the ones whose p50 is genuinely large.
+
+**Beware the scripted-vs-match confound.** Splitting each bucket into purposely
+scripted single-car recordings versus real-gameplay match recordings separates a
+physics defect from an artefact of one recording style:
+
+| bucket | scripted mean | match mean | verdict |
+|---|---|---|---|
+| `wall_ceiling` | 7.70 (n=5186) | 8.70 (n=29144) | reproduces in both — real defect |
+| `drive_throttle` | 2.33 | 2.68 | reproduces in both |
+| `air_free` | 1.43 | 2.00 | reproduces in both |
+| `drive_handbrake` | 2.64 (n=1117) | 11.40 (n=11462) | 4.3x — match-specific |
+| `drive_coast` | 1.54 | 6.57 | 4.3x — match-specific |
+
+Three hypotheses for the handbrake/coast gap were tested and **refuted**, so do
+not re-spend effort on them:
+
+- *Non-Octane car bodies in match recordings.* `RecordingInfo::hitbox_rel_min_bt`
+  / `_max_bt` are zero in all 424 files (the logger never fills them), but the
+  bodies can be fingerprinted from ride height instead: median flat-floor upright
+  `pos.z` is 17.00-17.06 and median front `susp_length` -1.98 in every recording,
+  match and scripted alike. Every car in the suite is an Octane.
+- *Control misalignment.* `RLCTRLOFF=-1|0|+1` shifts which tick supplies the
+  step's controls. Offset 0 wins on every bucket and on both groups
+  (match mean 5.13 vs 5.46 at -1 and 8.08 at +1), so the harness's assumption —
+  tick `T`'s `prev_controls` drove the step `T-1 -> T` — is correct.
+- *Handbrake mid-ramp ticks.* Real play taps the handbrake, so `POWERSLIDE_RISE_RATE`
+  could have been implicated. `RLCENSUS=3` produces no `hb-ramp` band at all:
+  recorded `handbrake_val` is only ever 0 or 1.
+
+What is left is that the match recordings simply visit harder parts of the input
+space. `RLCENSUS=3` shows the handbrake error rising monotonically with speed
+(p50 0.98 / 3.32 / 8.19 / 9.68 / 10.73 across the five speed bands) while every
+scripted powerslide recording sits at 94-1318 uu/s median. The lateral
+`magbias` (\|sim.axis\| - \|game.axis\|, which unlike a signed bias does not cancel
+between left and right slides) accounts for essentially the whole bucket:
++11.37 against a p50 of 10.73 at 1.8k+. The sim keeps too much lateral speed.
+
+That is consistent with — and does not supersede — the bimodality result in
+*Lateral Wheel Friction Has No Coulomb Limit* below. The census measures total
+per-step error, not the per-tick required multiplier, so it cannot see whether
+the residual is bimodal, and the standing instruction not to retune
+`LAT_FRICTION` or `HANDBRAKE_LAT_FRICTION_FACTOR` on inference still holds.
+
+#### Open defect: the car is pushed off walls and ceilings
+
+`wall_ceiling` is the largest car-only bucket that survives every confound
+check. Its residual is **directional**: the mean signed residual along the car's
+own up axis is +1.69 (scripted) / +2.48 (match), rising to +3.76 in the 1.8k+
+band against a p50 of 4.99. On a vertical wall the car's up axis is horizontal,
+so gravity contributes nothing along it and the balance is only two terms — the
+suspension pushing out and the sticky force pulling in
+(`Car::update_wheels`, `sticky_force_scale = 0.5 + (1 - |up.z|)`). A consistent
++3.76 uu/s per tick is ~46% of the 975 uu/s^2 sticky force on a wall.
+
+Unlike the friction residual this is a single-axis, single-sign error, and it is
+present in the scripted single-car wall recordings, so it can be worked without
+the observer changes. Per-case p50s locate it further: steady wall driving is
+fine (`car_mech_wall_drive_vertical` 0.17, `car_mech_wall_drive_up` 0.12,
+`car_ground_to_wall_slow` 0.01) while getting *onto* a wall at speed is not
+(`car_supersonic_into_wall` 36.2, `car_supersonic_into_corner` 38.0,
+`car_ground_to_wall_back` 25.96, `car_ball_wall_pinch_back` 31.97). The
+two-point probe method described below for `lat_friction` applies unchanged to
+the sticky force and the suspension normal force.
+
 ### Lateral Wheel Friction Has No Coulomb Limit
 
 The item long listed here as "the shared slip-friction curve" (powerslide
@@ -596,6 +696,8 @@ order/quantization, often acceptable.
 | `RLCAR` | focus one car index (`0`…), or `all` | `all` |
 | `RLTICK` | deep-dive a specific tick instead of the worst | worst |
 | `RLSEG` | `1` to also print per-situation breakdowns | off |
+| `RLCENSUS` | `1` error-mass census by cause; `2` also lists each bucket's worst steps; `3` sub-bands by speed + handbrake state; `4` sub-bands by `friction_curve_input` | off |
+| `RLCTRLOFF` | shift which tick the census reads controls from (`-1`/`0`/`+1`), to re-verify control alignment | `0` |
 | `RLTHREADS` | worker threads for the per-tick pass | all cores (≤16) |
 | `RLCONT` | `1` to also run the sequential continuous (compounding) pass | off |
 | `RLCPP` | `1` to also replay through the **C++ RocketSim** (`rocketsim_rs` bindings) and report side-by-side. Requires `--features cpp-compare` | off |
