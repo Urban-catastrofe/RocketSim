@@ -464,26 +464,89 @@ per-step error, not the per-tick required multiplier, so it cannot see whether
 the residual is bimodal, and the standing instruction not to retune
 `LAT_FRICTION` or `HANDBRAKE_LAT_FRICTION_FACTOR` on inference still holds.
 
-#### Open defect: the car is pushed off walls and ceilings
+#### Fixed: the wheel ray pushback used twice Rocket League's ERP
 
-`wall_ceiling` is the largest car-only bucket that survives every confound
-check. Its residual is **directional**: the mean signed residual along the car's
-own up axis is +1.69 (scripted) / +2.48 (match), rising to +3.76 in the 1.8k+
-band against a p50 of 4.99. On a vertical wall the car's up axis is horizontal,
-so gravity contributes nothing along it and the balance is only two terms — the
-suspension pushing out and the sticky force pulling in
-(`Car::update_wheels`, `sticky_force_scale = 0.5 + (1 - |up.z|)`). A consistent
-+3.76 uu/s per tick is ~46% of the 975 uu/s^2 sticky force on a wall.
+`wall_ceiling` was the largest car-only bucket surviving every confound check,
+and its residual was **directional**: the mean signed residual along the car's
+own up axis ran +1.69 (scripted) / +2.48 (match), rising to +3.76 in the 1.8k+
+band. The car was being pushed off the surface.
 
-Unlike the friction residual this is a single-axis, single-sign error, and it is
-present in the scripted single-car wall recordings, so it can be worked without
-the observer changes. Per-case p50s locate it further: steady wall driving is
-fine (`car_mech_wall_drive_vertical` 0.17, `car_mech_wall_drive_up` 0.12,
-`car_ground_to_wall_slow` 0.01) while getting *onto* a wall at speed is not
-(`car_supersonic_into_wall` 36.2, `car_supersonic_into_corner` 38.0,
-`car_ground_to_wall_back` 25.96, `car_ball_wall_pinch_back` 31.97). The
-two-point probe method described below for `lat_friction` applies unchanged to
-the sticky force and the suspension normal force.
+It turned out not to be a wall defect at all. Banding by recorded `susp_length`
+(`RLCENSUS=5`, then `=7` for 1-UU bands with the suspension quiet so the damping
+term contributes nothing) shows the same ladder on the flat floor as on walls —
+the up-axis residual is a function of **suspension compression**, and walls
+merely contain a lot of hard-compression steps:
+
+| compression (UU) | steps | up-bias | required spring k | required pushback k |
+|---|---|---|---|---|
+| 0-1 | 972 | -0.05 | 1.013 | (term inactive) |
+| 1-2 | 171 926 | -0.20 | 1.026 | (term inactive) |
+| 2-3 | 33 711 | -0.24 | 1.026 | 1.204 |
+| 3-4 | 7 379 | +1.21 | 0.910 | 0.815 |
+| 4-5 | 2 986 | +3.73 | 0.787 | 0.714 |
+| 5-6 | 2 154 | +7.03 | 0.674 | 0.675 |
+| 6-7 | 1 553 | +10.13 | 0.602 | 0.686 |
+| 7-8 | 872 | +11.20 | 0.616 | 0.726 |
+| 8-9 | 523 | +14.40 | 0.568 | 0.710 |
+| 9-10 | 220 | +13.49 | 0.630 | 0.766 |
+| 10-11 | 99 | +16.98 | 0.569 | 0.728 |
+
+The knee sits at 2.5-3 UU, which is exactly where `extra_pushback` switches on:
+`apply_ray_cast` runs it when `suspension_length < rest1 - SUSPENSION_SUBTRACTION`,
+and `SUSPENSION_SUBTRACTION` is 0.05 BT = **2.5 UU**. Three candidate mechanisms
+were separated by shape:
+
+- **Spring stiffness** — rejected. A stiffness error is proportional at every
+  compression, so it would show one flat multiplier; instead the required spring
+  multiplier is flat at 1.026 up to the knee and then slides 0.91 -> 0.57.
+- **A maximum suspension force** (C++ `Car.cpp:296` sets
+  `m_maxSuspensionForce = FLT_MAX` with the comment "Don't think there's a
+  limit", and the Rust port dropped the field) — rejected. A clamp needs the
+  required multiplier to *fall* with depth; `k_push` is flat, and `k*compression`
+  keeps rising rather than levelling off.
+- **The pushback term** — fits. One constant multiplier explains every depth from
+  3 to 11 UU, and below the knee the term's sensitivity is ~0 as the threshold
+  predicts.
+
+Scaling only the **positional** (Baumgarte) half of the pushback — leaving the
+velocity half, which is a genuine collision response — fits better than scaling
+the whole impulse (-3.98% vs -2.92% on the suite mean), and its optimum is at
+half of Bullet's `m_erp`:
+
+| effective ERP | 0.200 (was) | 0.150 | 0.120 | **0.100** | 0.090 | 0.080 | 0.060 |
+|---|---|---|---|---|---|---|---|
+| suite mean uu/s | 4.7793 | 4.6478 | 4.5981 | **4.5892** | 4.5958 | 4.6056 | 4.6287 |
+
+So `contact_solver_info::RAY_PUSHBACK_ERP = 0.1`. Rocket League's Bullet dates
+from 2013-2015 (as the C++ solver-info comment notes) and a factor of exactly two
+in an error-reduction parameter is a plausible version difference; 0.1 is also
+already the value of `SPLIT_IMPULSE_TURN_ERP`. `resolve_single_collision`'s only
+caller is the suspension ray, so the constant lives at that call site — a second
+caller would have to pass its own ERP in.
+
+Result over 464 471 measured car steps: suite mean **4.7793 -> 4.5892 uu/s
+(-3.98%)**, worst single step unchanged, and no bucket regressed:
+
+| bucket | before | after | |
+|---|---|---|---|
+| `wall_ceiling` | 8.55 | 7.20 | **-15.8%** (p50 2.96 -> 2.00) |
+| `drive_coast` | 3.66 | 3.29 | -10.0% |
+| `drive_boost` | 2.42 | 2.20 | -9.0% |
+| `drive_throttle` | 2.66 | 2.58 | -3.0% |
+| `drive_partial` | 7.54 | 7.32 | -3.0% |
+| `ball_contact` | 16.13 | 15.71 | -2.6% |
+| `wheel_transition` | 14.64 | 14.45 | -1.3% |
+| `drive_handbrake` | 10.63 | 10.50 | -1.2% |
+
+The gate still reads 39 passed / 392 failed: it hard-gates on the *worst* step at
+a 0.03 budget, so a broad mean improvement of this size does not flip cases.
+
+Two smaller things fell out and are **not** fixed. The spring force is ~2.5% too
+weak below the knee (`k_spring` 1.026 over 205 000 steps) — real but small. And
+steps where the suspension is *extending* fast carry a large negative up-bias
+(-14 at rest compression), which is a separate relaxation-side defect;
+`WHEELS_DAMPING_RELAXATION` (40) versus `WHEELS_DAMPING_COMPRESSION` (25) is the
+obvious place to look.
 
 ### Lateral Wheel Friction Has No Coulomb Limit
 
@@ -696,7 +759,7 @@ order/quantization, often acceptable.
 | `RLCAR` | focus one car index (`0`…), or `all` | `all` |
 | `RLTICK` | deep-dive a specific tick instead of the worst | worst |
 | `RLSEG` | `1` to also print per-situation breakdowns | off |
-| `RLCENSUS` | `1` error-mass census by cause; `2` also lists each bucket's worst steps; `3` sub-bands by speed + handbrake state; `4` sub-bands by `friction_curve_input` | off |
+| `RLCENSUS` | `1` error-mass census by cause; `2` also lists each bucket's worst steps; `3` sub-bands by speed + handbrake state; `4` by `friction_curve_input`; `5` by suspension compression; `6` by compression x compression rate; `7` 1-UU compression bands with a quiet suspension | off |
 | `RLCTRLOFF` | shift which tick the census reads controls from (`-1`/`0`/`+1`), to re-verify control alignment | `0` |
 | `RLTHREADS` | worker threads for the per-tick pass | all cores (≤16) |
 | `RLCONT` | `1` to also run the sequential continuous (compounding) pass | off |

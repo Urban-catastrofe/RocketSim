@@ -6,6 +6,13 @@ use super::{
 };
 use crate::bullet::dynamics::rigid_body::RigidBody;
 
+/// Penetration-recovery impulse for a single contact, returned rather than
+/// applied (Bullet's `resolveSingleCollision` with `applyImpulses = false`).
+///
+/// The only caller is [`WheelInfo::apply_ray_cast`], so the positional term
+/// uses [`contact_solver_info::RAY_PUSHBACK_ERP`], which is calibrated against
+/// ground truth for the suspension ray specifically. A second caller would
+/// need that ERP passed in rather than assumed.
 pub fn resolve_single_collision(
     body1: &RigidBody,
     body2: &RigidBody,
@@ -22,7 +29,7 @@ pub fn resolve_single_collision(
     let vel = vel1 - vel2;
     let rel_vel = contact_normal_on_b.dot(vel);
 
-    let positional_error = contact_solver_info::ERP * -distance / time_step;
+    let positional_error = contact_solver_info::RAY_PUSHBACK_ERP * -distance / time_step;
     let vel_error = -rel_vel;
     let denom0 = body1.compute_impulse_denominator(contact_pos_world, contact_normal_on_b);
     let denom1 = body2.compute_impulse_denominator(contact_pos_world, contact_normal_on_b);
