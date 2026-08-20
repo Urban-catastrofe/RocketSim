@@ -198,6 +198,111 @@ dodge; flip windows have a median of 1.2 UU/s), so the 300–450 UU/s "flip
 defect" the per-tick gate used to report was entirely φ. What the window does
 show is listed under Known Impulse Defects below.
 
+### Car-Car Bumps Are Sub-Frame Events Too
+
+A bump lands at a sub-frame time exactly like a jump press, so the recorded tick
+that carries it is not reproducible from a frame-aligned restore. There is no
+flag for it — the observer records no bump event — so
+`recording/normalize.rs::detect_bump_onsets` recovers the onset from Rocket
+League's own position/velocity **self**-consistency instead.
+
+On an ordinary tick the recording satisfies `pos[t] - pos[t-1] == vel[t] * dt`.
+Measured over 477939 non-teleport car/ticks that residual runs p50 = 0.004,
+p90 = 0.006, p99 = 0.21 UU. An impulse applied partway through a step has to
+break the identity, because part of the step was travelled at the pre-impulse
+velocity. On `car_car_basic_bump` the bump tick reads 1.90 UU (bumper) and
+4.29 UU (victim) — two to three orders of magnitude above the p90 floor. Solving
+`dpos = [v_pre*phi + v_post*(1-phi)] * dt` for the victim gives phi = 0.41.
+
+This is the right criterion rather than a proxy: a bump that lands at phi = 0
+leaves the identity intact, and that tick really is reproducible. Only provably
+unmeasurable ticks get marked — 510 across the suite, 0.101% of all car/ticks, in
+28 of 424 cases, so the gate is not being hollowed out.
+
+Two confounders also break the identity and are excluded first. **Teleports**
+(demo respawn, kickoff reset) are caught by a displacement bound. **Dropped
+logger frames** are real and had to be found the hard way: `2v2_1` cars 1 and 3
+hold `|dpos|` = 38.4 UU for 18 consecutive ticks at exactly 2300 UU/s, which is
+precisely `2 * vel * dt`. They are caught by requiring `physics_frame` to advance
+by exactly `stride`. Proximity to another car is required on top, so sub-frame
+events from other subsystems are not swept up as bumps.
+
+The free-run is what makes bumps measurable at all. A bump fires on geometric
+contact, and Bullet detects contact from the positions at the *start* of a step:
+on `car_car_basic_bump` the restored frame still leaves a 5.6 UU gap that the
+step then closes, so a single restored step cannot produce the bump however
+correct the impulse is. Two free-running steps let the first close the gap and
+the second fire.
+
+**Fixed alongside it: the bump cooldown leaked across restores.** RL's
+per-victim 0.25 s cooldown is not in the recording, so it cannot be restored —
+and `set_state_to_record_tick` used to leave it alone, letting it survive from
+whatever the arena did on previous steps. Every bump measurement therefore
+depended on how many steps had run before it. In `car_car_basic_bump` the bump
+fired in the first impulse window, then the cooldown suppressed it for the next
+30 steps, so the second window — measuring the *other* car of the same event —
+saw the physical response alone and read 274 UU/s where the game shows 1302.
+`bump_cooldown_timer` and `bump_other_car_id` are now cleared on restore.
+
+#### What the bump window says
+
+The bump magnitude curves and their input are **correct**. Decomposing
+`car_car_basic_bump` by hand (closing 972.9, equal masses, perfectly-inelastic
+common velocity 487.4) gives:
+
+| quantity | ground truth | sim's own curve | error |
+|---|---|---|---|
+| bump forward | 768.1 | `BUMP_VEL_AMOUNT_GROUND(973)` = 764.7 | 0.4% |
+| bump upward | 189.9 (gravity-corrected) | `BUMP_UPWARD_VEL_AMOUNT(973)` = 193.3 | 1.8% |
+| restitution | +0.060 | `HIT_CAR_COEFS.restitution` = 0.1 | same order |
+
+`car_car_head_on_bump` confirms it independently and pins the curve input as
+`attacker.vel . dir_to_victim` rather than the closing speed: predicted 982/996
+forward and 248 up against 1087/1154 and 246 actual, effective restitution
+0.12–0.14.
+
+With the cooldown leak fixed and `RL_CAR_SOFTEN` disabled, `car_car_basic_bump`
+reads `vel_err` **6.54** (bumper) and **10.37** (victim), against 262.69 and
+1046.04 before. As with the flip, most of the apparent defect was measurement.
+
+#### `hit_car_phys_soften_speed` is not modelling anything real
+
+Its doc comment claims RL resolves car-car almost entirely via the bump impulse
+and that "the bullet inelastic response would reverse them".
+`car_car_head_on_bump` shows RL going **+1267.9 -> -1153.0** and
+**-1249.6 -> +1154.0**. RL *does* reverse them. Measured on the bump window
+across the 17 `car_car` cases (118 events, weighted mean):
+
+| | soften=500 | soften off |
+|---|---|---|
+| weighted mean | 531.41 | **421.28** |
+| basic_bump | 263.78 | **8.46** |
+| head_on_bump | 566.14 | **10.60** |
+| diagonal_fast | 725.78 | **122.76** |
+| aerial_bump | 770.24 | **177.00** |
+| boost_contest | **427.58** | 832.53 |
+| long_boost_headon | **466.07** | 687.18 |
+
+Note the exact arithmetic: at soften=500 the bumper in `car_car_basic_bump`
+reads `sim dv` −278.5 against the game's −541.2, a ratio of 0.515 — precisely
+`500/973`. The softening factor *is* the whole bumper-side error.
+
+The cases that regress are only the ones where the cars deeply interpenetrate,
+and they point at **continuous collision detection**, not impulse magnitude. In
+`car_car_boost_contest` the closing speed is 4126 UU/s = 34.4 UU per tick,
+comparable to the hitbox depth: RL applies its impulse at the sub-frame moment
+of touching and the cars pass through, ending 85 UU apart (overlapping by 33)
+and separating gently at ±650 with +310 vz. Bullet's discrete detection jumps
+straight into deep overlap and resolves the accumulated penetration in one go.
+Softening masks that; it does not fix it.
+
+Splitting the softening into velocity and depenetration terms was tried and does
+nothing: `rhs_penetration` is always zero here because penetration stays above
+`SPLIT_IMPULSE_PENETRATION_THRESHOLD`, so the two are byte-identical. Sweeping
+the constant gives only a shallow, contaminated optimum (per-tick total mean
+245.87 @500, 239.48 @1000, 232.08 @2000, 232.51 @3000, 236.16 @off) — which is
+why it should not be fitted that way.
+
 ### Known Impulse Defects
 
 1. **Grounded jump reads ~10 UU/s too much vertical velocity.** Every jump

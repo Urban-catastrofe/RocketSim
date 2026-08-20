@@ -7,6 +7,8 @@
 //! every consumer (per-tick gate, residual decomposition, rollout, deep dive and
 //! the C++ side-by-side) on one consistent interpretation.
 
+use glam::Vec3A;
+use rocketsim::consts::TICK_TIME;
 use rocketsim::consts::car::jump;
 
 use super::tick_record::TickRecord;
@@ -46,6 +48,94 @@ pub fn detect_impulse_onsets(ticks: &[TickRecord], num_cars: usize) -> Vec<Vec<b
                 .collect()
         })
         .collect()
+}
+
+/// A car-car bump lands at a sub-frame time just like a jump press, so the
+/// recorded tick that carries it is not reproducible from a frame-aligned
+/// restore. Unlike a jump there is no flag to read: the observer records no
+/// bump event, so the onset has to be recovered from the kinematics.
+///
+/// The marker is Rocket League's own position/velocity *self*-consistency. On
+/// an ordinary tick the recording satisfies `pos[t] - pos[t-1] == vel[t] * dt`
+/// to within float noise — measured over 477939 non-teleport car/ticks of the
+/// suite, that residual runs p50 = 0.004, p90 = 0.006, p99 = 0.21 UU. When an
+/// impulse is applied partway through a step the identity has to break, because
+/// part of the step was travelled at the pre-impulse velocity. On
+/// `car_car_basic_bump` the bump tick shows 1.90 UU (bumper) and 4.29 UU
+/// (victim) — two to three orders of magnitude above the p90 floor. Solving
+/// `dpos = [v_pre*phi + v_post*(1-phi)] * dt` for the victim gives phi = 0.41,
+/// i.e. the impulse landed 41% into the tick.
+///
+/// The residual is exactly the right criterion rather than a proxy: a bump that
+/// happened to land at phi = 0 leaves the identity intact, and that tick really
+/// is reproducible by a frame-aligned restore. Only ticks that are provably
+/// unmeasurable get marked.
+///
+/// Two confounders also break the identity and are excluded first:
+///
+/// - **Teleports** (demo respawn, kickoff reset) move a car hundreds of UU in
+///   one tick. Caught by the displacement bound.
+/// - **Dropped logger frames**, which are real: `2v2_1` cars 1 and 3 hold
+///   `|dpos|` = 38.4 UU for 18 consecutive ticks at exactly 2300 UU/s, which is
+///   precisely `2 * vel * dt`. Caught by requiring `physics_frame` to advance by
+///   exactly `stride`.
+///
+/// Proximity to another car is required on top, so that sub-frame events from
+/// other subsystems (ball hits, world contacts) are not swept up as bumps.
+pub fn detect_bump_onsets(ticks: &[TickRecord], num_cars: usize, stride: usize) -> Vec<Vec<bool>> {
+    /// Position/velocity inconsistency (UU) above which a step cannot have been
+    /// a single frame-aligned integration. 40x the measured p90 of 0.006 and
+    /// still ~8x below the smallest bump residual observed (1.90).
+    const SUBFRAME_POS_RESIDUAL: f32 = 0.25;
+
+    /// Centre separation (UU) within which two cars can be in contact. The
+    /// Octane hitbox (120.507 x 86.6994 x 38.6591, offset (13.8757, 0, 20.755))
+    /// reaches 94.8 UU from the car origin at its furthest corner, so two of
+    /// them touch at up to 189.5 UU apart; one tick of maximum closing travel
+    /// (2 * 2300 / 120 = 38.3) is added on top.
+    const BUMP_PROXIMITY: f32 = 240.0;
+
+    /// One tick can carry at most `MAX_SPEED / TICK_RATE` = 19.2 UU. Anything
+    /// well beyond that is a teleport, not a physics step.
+    const MAX_STEP_DISPLACEMENT: f32 = 40.0;
+
+    let dt = TICK_TIME * stride as f32;
+    let mut onsets = vec![vec![false; num_cars]; ticks.len()];
+
+    for t in stride..ticks.len() {
+        let (from, to) = (&ticks[t - stride], &ticks[t]);
+        for (car, mark) in onsets[t].iter_mut().enumerate() {
+            let (Some(a), Some(b)) = (from.car_records.get(car), to.car_records.get(car)) else {
+                continue;
+            };
+            if a.is_demoed || b.is_demoed {
+                continue;
+            }
+            if b.phys.physics_frame != a.phys.physics_frame + stride as u32 {
+                continue;
+            }
+
+            let p0: Vec3A = a.phys.pos.into();
+            let p1: Vec3A = b.phys.pos.into();
+            let v1: Vec3A = b.phys.lin_vel.into();
+            let step = p1 - p0;
+            if step.length() > MAX_STEP_DISPLACEMENT {
+                continue;
+            }
+            if (step - v1 * dt).length() <= SUBFRAME_POS_RESIDUAL {
+                continue;
+            }
+
+            let near_other_car = (0..num_cars).filter(|&o| o != car).any(|o| {
+                to.car_records.get(o).is_some_and(|other| {
+                    !other.is_demoed && (Vec3A::from(other.phys.pos) - p1).length() < BUMP_PROXIMITY
+                })
+            });
+            *mark = near_other_car;
+        }
+    }
+
+    onsets
 }
 
 /// Rewrite `is_jumping` from the observer's activation *pulse* into the sim's

@@ -14,6 +14,14 @@
 //! The sim is restored once, at `onset−1`, and then free-runs both steps with
 //! the recorded controls. Restoring in between would re-impose the recording's
 //! arbitrary split and defeat the whole point.
+//!
+//! Car-car bumps get the same treatment for the same reason, and the free-run is
+//! what makes them measurable at all. A bump fires on geometric contact, and
+//! Bullet detects contact from the positions at the *start* of a step: on
+//! `car_car_basic_bump` the restored frame still leaves a 5.6 UU gap that the
+//! step then closes, so a single restored step cannot produce the bump however
+//! correct the impulse is. Free-running two steps lets the first close the gap
+//! and the second fire, which tests the magnitude with the timing divided out.
 
 use glam::Vec3A;
 use rocketsim::CarControls;
@@ -22,9 +30,12 @@ use super::config::HarnessConfig;
 use super::recording::Recording;
 use super::runner::{has_discontinuity, is_car_sentinel, make_arena, set_state_to_record_tick};
 
-/// Which mechanic produced the impulse, for reporting.
-fn classify(rec: &super::recording::cpp_records::CarRecord) -> &'static str {
-    if rec.is_flipping {
+/// Which mechanic produced the impulse, for reporting. A bump is identified by
+/// the onset mark rather than by a flag — the observer records no bump event.
+fn classify(rec: &super::recording::cpp_records::CarRecord, is_bump: bool) -> &'static str {
+    if is_bump {
+        "bump"
+    } else if rec.is_flipping {
         "flip"
     } else if rec.is_on_ground {
         "jump"
@@ -81,9 +92,14 @@ pub fn measure_impulses(recording: &Recording, cfg: &HarnessConfig) -> ImpulseRe
     // Collect (onset tick, car) pairs in tick order so the arena walks forward.
     for onset in 0..recording.ticks.len() {
         for car in 0..num_cars {
-            if !recording.is_impulse_onset(onset, car) {
+            if !recording.is_any_onset(onset, car) {
                 continue;
             }
+            // A bump onset that coincides with a press is reported as the press:
+            // the sim reproduces a press from the recorded controls, so that is
+            // the stronger classification.
+            let is_bump =
+                recording.is_bump_onset(onset, car) && !recording.is_impulse_onset(onset, car);
             if cfg.car_focus.is_some_and(|c| c != car) {
                 continue;
             }
@@ -131,7 +147,7 @@ pub fn measure_impulses(recording: &Recording, cfg: &HarnessConfig) -> ImpulseRe
             report.events.push(ImpulseEvent {
                 car,
                 onset_tick: onset,
-                kind: classify(&recording.ticks[onset].car_records[car]),
+                kind: classify(&recording.ticks[onset].car_records[car], is_bump),
                 game_dvel: v_end - v0,
                 sim_dvel: sim.phys.vel - v0,
                 vel_err: (sim.phys.vel - v_end).length(),
@@ -157,7 +173,7 @@ pub fn impulse_lines(report: &ImpulseReport, cfg: &HarnessConfig) -> Vec<String>
     }
 
     let budget = cfg.tolerance.impulse_vel;
-    for kind in ["jump", "double_jump", "flip"] {
+    for kind in ["jump", "double_jump", "flip", "bump"] {
         let of_kind: Vec<&ImpulseEvent> = report.events.iter().filter(|e| e.kind == kind).collect();
         if of_kind.is_empty() {
             continue;

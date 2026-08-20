@@ -39,9 +39,11 @@ pub fn reorder_cars(recording: &mut Recording) {
     // Zip the onset marks so they follow the same permutation; they are indexed
     // by canonical car and would otherwise silently point at the wrong car.
     let mut onsets = recording.impulse_onsets.iter_mut();
+    let mut bumps = recording.bump_onsets.iter_mut();
 
     for tick in recording.ticks.iter_mut() {
         let onset_row = onsets.next();
+        let bump_row = bumps.next();
         if tick.car_records.len() != n {
             continue;
         }
@@ -65,7 +67,10 @@ pub fn reorder_cars(recording: &mut Recording) {
         for (current, &canon) in assignment.iter().enumerate() {
             tick.car_records[canon] = old[current];
         }
-        if let Some(row) = onset_row.filter(|r| r.len() == n) {
+        for row in [onset_row, bump_row].into_iter().flatten() {
+            if row.len() != n {
+                continue;
+            }
             let old_row = row.clone();
             for (current, &canon) in assignment.iter().enumerate() {
                 row[canon] = old_row[current];

@@ -138,6 +138,18 @@ pub fn set_state_to_record_tick(
         cs.demo_respawn_timer = rep_cs.demo_respawn_timer;
         cs.air_time = rep_cs.air_time;
         cs.air_time_since_jump = rep_cs.air_time_since_jump;
+        // ── bump cooldown ──
+        // RL's per-victim bump cooldown is not in the recording, so it cannot be
+        // restored. Left alone it survives the restore and carries over from
+        // whatever the arena did on previous steps, which made every bump
+        // measurement depend on how many steps had run before it: in
+        // `car_car_basic_bump` the bump fired in the first impulse window, then
+        // the 0.25 s cooldown suppressed it for the next 30 steps, so the second
+        // window — measuring the other car of the same event — saw the physical
+        // response alone and read 274 UU/s where the game shows 1302. Clearing
+        // it makes every restored step start from the same state.
+        cs.bump_cooldown_timer = 0.0;
+        cs.bump_other_car_id = usize::MAX;
 
         // The observer tracks is_flipping until landing; the sim ends it
         // after TORQUE_TIME. If the recording has is_flipping=true with

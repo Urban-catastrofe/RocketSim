@@ -29,24 +29,44 @@ pub struct Recording {
     /// [`normalize::detect_impulse_onsets`]. Kept in step with `ticks` by
     /// `car_order::reorder_cars`, which permutes both.
     pub impulse_onsets: Vec<Vec<bool>>,
+    /// Per `[tick][car]`: a car-car bump landed inside this tick at a sub-frame
+    /// time. Recovered from Rocket League's own position/velocity consistency
+    /// rather than from a flag — see [`normalize::detect_bump_onsets`]. Permuted
+    /// alongside `impulse_onsets` by `car_order::reorder_cars`.
+    pub bump_onsets: Vec<Vec<bool>>,
 }
 
 impl Recording {
-    /// True if car `car` starts an impulse on `tick`.
+    /// True if car `car` starts a button-triggered impulse on `tick`.
     pub fn is_impulse_onset(&self, tick: usize, car: usize) -> bool {
-        self.impulse_onsets
+        Self::marked(&self.impulse_onsets, tick, car)
+    }
+
+    /// True if car `car` took or dealt a sub-frame bump on `tick`.
+    pub fn is_bump_onset(&self, tick: usize, car: usize) -> bool {
+        Self::marked(&self.bump_onsets, tick, car)
+    }
+
+    fn marked(marks: &[Vec<bool>], tick: usize, car: usize) -> bool {
+        marks
             .get(tick)
             .and_then(|row| row.get(car))
             .copied()
             .unwrap_or(false)
     }
 
-    /// True if the step `tick -> tick + stride` straddles an impulse press for
-    /// car `car`. The press sits between the two recorded frames either side of
-    /// an onset tick, so both the step into the onset and the step out of it
-    /// carry an arbitrary share of the impulse.
+    /// True if car `car` begins any sub-frame impulse on `tick` — a jump, double
+    /// jump or flip press, or a car-car bump.
+    pub fn is_any_onset(&self, tick: usize, car: usize) -> bool {
+        self.is_impulse_onset(tick, car) || self.is_bump_onset(tick, car)
+    }
+
+    /// True if the step `tick -> tick + stride` straddles a sub-frame impulse
+    /// for car `car`. The impulse sits between the two recorded frames either
+    /// side of an onset tick, so both the step into the onset and the step out
+    /// of it carry an arbitrary share of it.
     pub fn step_straddles_impulse(&self, tick: usize, stride: usize, car: usize) -> bool {
-        self.is_impulse_onset(tick, car) || self.is_impulse_onset(tick + stride, car)
+        self.is_any_onset(tick, car) || self.is_any_onset(tick + stride, car)
     }
 }
 
@@ -140,12 +160,17 @@ impl Recording {
                 ),
             ));
         }
+        // Needs `stride`, so it runs after the rate check. Uses positions and
+        // velocities only, which `normalize_jump_active` does not touch.
+        let bump_onsets = normalize::detect_bump_onsets(&ticks, num_cars, stride);
+
         Ok(Self {
             name: name.to_string(),
             info,
             ticks,
             stride,
             impulse_onsets,
+            bump_onsets,
         })
     }
 
