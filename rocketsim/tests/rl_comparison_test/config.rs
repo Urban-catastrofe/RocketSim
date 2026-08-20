@@ -126,7 +126,9 @@ impl HarnessConfig {
         }
 
         if let Ok(r) = env_usize("RLDEEP_RADIUS") {
-            cfg.deep_dive_radius = r.clamp(1, 240);
+            // Upper bound is a runaway-output guard only; a whole-recording
+            // dump is a legitimate use (per-tick calibration sweeps).
+            cfg.deep_dive_radius = r.clamp(1, 1 << 20);
         }
 
         cfg.car_focus = match std::env::var("RLCAR").ok().as_deref() {

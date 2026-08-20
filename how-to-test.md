@@ -296,45 +296,80 @@ required multiplier `k_req = (dLat_real − C)/A` is directly measurable per tic
 from a `RLDEEP` dump. Set `RLTICK` to half the recording length and
 `RLDEEP_RADIUS` to its full length to dump every tick.
 
-Handbrake off, flat ground, four wheels in contact:
+Measured first on two single-car drift recordings, then **re-measured over the
+match recordings** (`3v3` + `2v2_match`, 6 and 4 cars, 19 186 usable samples).
+The wider set contradicts part of the drift-only result, so only the match
+numbers below should be quoted.
 
-| mean lateral slip (UU/s) | n | `k_req` |
-|---|---|---|
-| < 256 | 1856 | **1.000** |
-| 256–512 | 72 | 0.532 |
-| 512–1024 | 32 | 0.256 |
+Handbrake off, by mean lateral slip speed (match recordings, median `k_req`):
 
-`lat_speed × k_req` is 181 / 192 / 185 across the top three bins: RL's lateral
-force **peaks somewhere around 130–260 UU/s of slip and then declines**, while
-the sim's grows monotonically without bound. The cause is structural —
-`resolve_single_bilateral` cancels lateral contact velocity with no
-Coulomb/normal-force limit, so nothing caps the force. Below the peak the sim is
-exact, so `LAT_FRICTION` and the 0.1 handbrake factor are both correctly
-calibrated for the regime they were fit to; only the unbounded tail is wrong.
+| mean lateral slip (UU/s) | n | `k_req` med | p25 |
+|---|---|---|---|
+| < 256 | 15 372 | 1.030 | 1.019 |
+| 256–512 | 707 | 0.807 | 0.672 |
+| 512–1024 | 143 | 1.024 | 0.705 |
 
-**This is the same root cause as the load-scaling defect** the suspension-ray fix
-exposed (`car_boost_then_jump` 6.59 → 14.37 UU/s). No wheel force is tied to
-normal force anywhere. Treat them as one item.
+So: a real but **milder** over-production of lateral force in the 256–512 band,
+and **no** effect at 512–1024. The drift-only pass reported `k_req` 0.532 and
+0.256 for those two bands with `lat_speed × k_req` pinned near 185, and
+concluded RL's lateral force "peaks around 130–260 UU/s and then declines".
+**That does not replicate** and should not be relied on — it was specific to the
+post-handbrake-release phase of two drift recordings. There is also a small
+systematic: the sim under-produces lateral force by ~3% (`k_req` 1.030) across
+more than 13 000 ordinary driving samples.
 
-A second, separate defect sits in the same code: with handbrake engaged and
-lateral slip **below** ~128 UU/s the sim is ~4× too weak (`k_req` 3.7–4.8),
-while at ≥ 128 UU/s it is exact (`k_req` 1.000 out to 2048 UU/s — the ×0.1 keeps
-it under the cap). The implied handbrake lateral factor is ~0.37 at low slip
-against the constant 0.10 in use, and
-`curves::HANDBRAKE_LAT_FRICTION_FACTOR` is a `LinearPieceCurve<1>` — a single
-point — where every sibling curve has two or more.
+**Whether any friction limit scales with normal load is not identifiable from
+these recordings**, and the reason is structural rather than a filtering choice:
+a car driving on the ground sits at its equilibrium ride height, so the load
+proxy is pinned — over 17 003 samples it runs p05 = 1.961, p50 = 1.971,
+p95 = 2.672. A constant cap and a load-proportional cap are therefore
+*observationally equivalent* for lateral friction, and the question that looked
+like it was blocking a fix cannot be answered with this data. (It still matters
+for the low-load *longitudinal* case, `car_boost_then_jump` — a regime absent
+from this sample.)
+
+The dominant residual is **handbrake at fci < 0.3**, where the sim is ~5× too
+weak over 959 samples. Critically that population is **bimodal, not scattered**:
+p25 ≈ 1.0, median ≈ 5.1, p75 ≈ 6.1 — the sim is either exact or off by ~5×. A
+bimodal split implies a discrete state difference, not a curve to retune. None of
+the available predictors explains it: fci (R² = 0.05), lateral slip speed, normal
+load, wheel-spin longitudinal slip (R² = 0.048), throttle sign, boost,
+supersonic, wheel count, or steering (the best discrete separator, `|steer| = 1`,
+only splits 0.79 vs 0.44).
+
+Above fci 0.3 with handbrake the sim is **exact**, and this is what validates the
+whole method: the measurement recovers the sim's own `HANDBRAKE_LAT_FRICTION_FACTOR`
+of 0.100 to three decimals (n = 205, p25–p75 = 0.099–0.100). The negatives above
+are therefore real, not measurement failure.
+
+**Do not retune `LAT_FRICTION` or the handbrake curve on this evidence.** Fitting
+a smooth curve to a bimodal residual would lower mean error while encoding the
+wrong mechanism. The unblock is the observer: `lat_friction`, `long_friction` and
+`engine_force` are dead fields that the logger already has slots for. Populating
+them and re-recording would expose RL's actual per-wheel coefficient directly and
+turn this entire subsystem from inference into measurement.
 
 Both are **faithful to C++**: `RLConst.h:483` really does define
 `HANDBRAKE_LAT_FRICTION_FACTOR_CURVE = {{0, 0.1f}}`, and
 `btVehicleRL.cpp:306 calcFrictionImpulses` has no cap either. These are upstream
 modelling gaps, not Rust port slips — don't go hunting for a transcription error.
 
-Unexplored ground truth found alongside: `WheelRecord::spin_speed` is **live**
-(non-zero in 97.9% of wheel samples) and physically sensible — it tracks forward
-speed, keeps spinning while airborne, and holds a steady ~1.122 ratio between a
-side's front and back wheel. RL tracks wheel angular velocity; the sim has no
-wheel-spin state at all. `lat_friction`, `long_friction`, `engine_force` and
-`steer_amount` are the genuinely dead fields.
+Ground truth decoded alongside: `WheelRecord::spin_speed` is **live** (non-zero
+in 97.9% of wheel samples) and is the wheel's angular velocity in rad/s —
+`spin_speed × wheel_radius` recovers the forward contact speed, fitting 12.60
+against the true 12.5 for the front pair and 15.04 against 15.0 for the back.
+The within-pair asymmetry is just inner/outer radius in a turn, which
+independently confirms both the radii and the left/right wheel assignment. RL
+tracks wheel angular velocity; the sim has no wheel-spin state at all, though
+adding it does *not* explain the handbrake residual. `lat_friction`,
+`long_friction`, `engine_force` and `steer_amount` are the genuinely dead
+fields.
+
+Tooling: `RLDEEP_RADIUS` is no longer capped at 240, so a single run can dump
+every tick of a recording (`RLTICK=<len/2> RLDEEP_RADIUS=<len>`), which is what
+the per-tick calibration sweep needs. The sweep itself scales `lat_friction` by
+k = 1 and k = 2 behind a temporary probe in `Car::pre_tick_update`; it is not
+committed.
 
 ## The Accuracy Bar
 
