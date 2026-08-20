@@ -541,12 +541,89 @@ Result over 464 471 measured car steps: suite mean **4.7793 -> 4.5892 uu/s
 The gate still reads 39 passed / 392 failed: it hard-gates on the *worst* step at
 a 0.03 budget, so a broad mean improvement of this size does not flip cases.
 
-Two smaller things fell out and are **not** fixed. The spring force is ~2.5% too
-weak below the knee (`k_spring` 1.026 over 205 000 steps) — real but small. And
-steps where the suspension is *extending* fast carry a large negative up-bias
-(-14 at rest compression), which is a separate relaxation-side defect;
-`WHEELS_DAMPING_RELAXATION` (40) versus `WHEELS_DAMPING_COMPRESSION` (25) is the
-obvious place to look.
+Two smaller things appeared to fall out of the compression banding — a spring
+~2.5% too weak below the knee (`k_spring` 1.026) and a large negative up-bias on
+fast-*extending* steps pointing at `WHEELS_DAMPING_RELAXATION`. **Both were
+measured directly and neither is real**; see the next section. Do not re-derive
+them from `RLCENSUS` bands: those bands are built on the logged `susp_length`,
+whose tick alignment relative to the pose is not resolvable, and a probe's
+"required multiplier" mixes in every other error on the step.
+
+### The Suspension Is Solved (RLSUSPDUMP)
+
+Measured 2026-08-20. **The suspension needs no further work.** All four
+coefficients are right, and the whole prize from re-fitting them is 0.011 uu/s.
+
+The method is what makes this conclusive, and it generalises. On a flat floor
+with an upright car and its wheels down, the *vertical* equation of motion is
+closed and scalar: the only vertical impulses are gravity, the sticky force,
+boost (through `forward.z`) and the suspension, because the wheel friction
+impulse lies in the contact plane. So Rocket League's own suspension impulse for
+a step falls straight out of the recording, with no simulation involved:
+
+```text
+dv_susp = (vel[i+1].z - vel[i].z) + 1.5 * g * dt - boost_z
+```
+
+That is an **absolute measurement of RL's suspension force**, not a "required
+multiplier" from a probe sweep — so the constants can be *fitted* rather than
+searched, and each one is identified separately instead of trading off against
+the others. `RLSUSPDUMP=1` emits one row per usable step (92 169 steps over 201
+recordings); the row format and the regression basis are documented in
+`suspdump.rs`.
+
+Fitted on the 78 803 rows below the pushback knee, where the spring and the two
+damping branches are the only live terms (trimmed least squares — the residual
+rms is two orders of magnitude above the median, so a plain fit reports landing
+impacts rather than the bulk):
+
+| constant | shipped | fitted | |
+|---|---|---|---|
+| `SUSPENSION_STIFFNESS` | 500 | **499.81** | right to 0.04% |
+| `WHEELS_DAMPING_RELAXATION` | 40 | **40.00** | right to 0.01% |
+| `WHEELS_DAMPING_COMPRESSION` | 25 | **25.37** | +1.5% |
+| `RAY_PUSHBACK_ERP` | 0.1 | **0.087** | above the knee only |
+
+Residual rms **0.0070 uu/s** over those 78 803 steps. The model reproduces RL
+across the full compression range 1.5 -> 13 uu and rate range -260 -> +300 uu/s
+with a median error of 0.0067 uu/s, and the sim itself tracks it at 0.0070.
+
+So both apparent leftovers are refuted at the source: the spring is exact, and
+`WHEELS_DAMPING_RELAXATION` is exact. Adopting *all* the fitted values moves the
+mean |model - RL| only 0.0952 -> 0.0843 uu/s. `RAY_PUSHBACK_ERP` is the one
+coefficient with real residual uncertainty — this channel prefers 0.087 — but
+the ERP sweep above, which measures the whole suite rather than the flat-floor
+vertical channel, is worse on both sides of 0.100 (0.090 -> 4.5958, 0.080 ->
+4.6056). It stays at 0.100; the flat-floor preference is noted, not acted on.
+
+What is left is a tail, not a coefficient: 2.06% of steps carry 85.8% of the
+remaining vertical error mass, and the *model* misses 806 of those 1895 steps
+too, so they are mostly sub-tick events (a wheel meeting the floor part-way
+through a tick) rather than a force that is mis-scaled.
+
+**Gotcha this pass exposed.** `set_state_to_record_tick` restores car and ball
+state but *not* Bullet's persistent contact manifolds, whose cached impulses are
+warm-started at `WARMSTARTING_FACTOR`. A diagnostic that restores and steps only
+the ticks it cares about therefore fires a manifold built from a pose hundreds of
+ticks old: the first version of this pass skipped non-candidate ticks and
+reported a steady +49 uu/s of phantom suspension force on cars alone in an empty
+half of the field. **Step every tick.** This is the same reason the sharded
+runner needs `SHARD_WARMUP_TICKS`.
+
+Two further traps worth knowing, both of which produced wrong answers first:
+
+- **Do not read the recordings outside the harness.** `car_order::reorder_cars`
+  canonicalises the car array because the logger's per-tick order rotates when
+  cars pass close, so an external reader cannot even difference one car's
+  velocity reliably, let alone line its rows up with the sim's.
+- **Do not take the logged `susp_length` as the current pose's suspension
+  state.** Its tick alignment is genuinely ambiguous (a direct lag test splits
+  49.4%/50.6%). Compute compression from the pose instead — the wheel ray leaves
+  the hardpoint along `-up` and meets the floor plane at `hard_point.z / up.z`,
+  which matches the log to 0.002 uu on steady cases — and keep the logged block
+  only as a gate. Cars on the corner ramps report a near-vertical normal on a
+  *rising* surface, which fakes a fast-extending suspension; that gate is what
+  rejects them.
 
 ### Lateral Wheel Friction Has No Coulomb Limit
 
@@ -761,6 +838,7 @@ order/quantization, often acceptable.
 | `RLSEG` | `1` to also print per-situation breakdowns | off |
 | `RLCENSUS` | `1` error-mass census by cause; `2` also lists each bucket's worst steps; `3` sub-bands by speed + handbrake state; `4` by `friction_curve_input`; `5` by suspension compression; `6` by compression x compression rate; `7` 1-UU compression bands with a quiet suspension | off |
 | `RLCTRLOFF` | shift which tick the census reads controls from (`-1`/`0`/`+1`), to re-verify control alignment | `0` |
+| `RLSUSPDUMP` | `1` to emit one `SUSPROW` per flat-floor step: RL's own suspension impulse and the sim's, with per-wheel compression and rate. See `suspdump.rs` | off |
 | `RLTHREADS` | worker threads for the per-tick pass | all cores (≤16) |
 | `RLCONT` | `1` to also run the sequential continuous (compounding) pass | off |
 | `RLCPP` | `1` to also replay through the **C++ RocketSim** (`rocketsim_rs` bindings) and report side-by-side. Requires `--features cpp-compare` | off |

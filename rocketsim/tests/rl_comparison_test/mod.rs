@@ -30,6 +30,7 @@ mod rollout;
 mod runner;
 mod state;
 mod stats;
+mod suspdump;
 mod tolerance;
 mod validate;
 
@@ -58,6 +59,13 @@ fn test_recording(recording: &Recording) {
         Ok("1") | Ok("2") | Ok("3") | Ok("4") | Ok("5") | Ok("6") | Ok("7") | Ok("true")
     ) {
         census::analyze(recording);
+        return;
+    }
+
+    // RLSUSPDUMP=1: dump the sim's post-step vel.z on flat-floor steps for
+    // the suspension study (see suspdump.rs).
+    if std::env::var("RLSUSPDUMP").is_ok() {
+        suspdump::analyze(recording);
         return;
     }
 
