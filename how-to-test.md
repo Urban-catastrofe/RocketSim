@@ -417,6 +417,8 @@ excluding the 1.3% of steps the gate skips as unmeasurable impulse windows:
 | `wheel_transition` | 1.1% | 12.93 | 3.7% |
 | `drive_coast` | 4.2% | 1.91 | 2.1% |
 
+**This table is measured over corrupted steps.** 0.7% of the suite's steps carry 21% of its error mass purely because the match replays sometimes hold one car in two slots; `car_proximity` above is 76% that artifact. See *Three Quarters of `car_proximity` Is Corrupted Ground Truth* below for the clean ranking.
+
 There was a twelfth bucket, `body_scrape`, at 34 steps and 0.04% of mass. It has
 been deleted: the field it was built on cannot express what it claimed to
 measure, and its steps belong to `wheel_transition`. See
@@ -1077,6 +1079,130 @@ onset captures 3% of that. The measurement infrastructure (`RLTOUCH=1`, the
 `touchdown` bucket) is kept because it scores any future attempt in one run, and
 the 2x overshoot is the number that attempt should start from.
 
+### Three Quarters of `car_proximity` Is Corrupted Ground Truth (RLCARC)
+
+`car_proximity` led the census at 26.7% of the suite's measurable mass, and it is
+selected by *centre* distance under 240 UU. That is a net, not a contact test:
+two Octanes 240 UU apart have 120 UU of clear air between them. `RLCENSUS=8`
+bands the bucket by the real hitbox gap, from the 15-axis SAT separation in
+`census::hitbox_separation`, and by the cause each step would have had if no car
+were nearby:
+
+| gap band | steps | mean | % of `car_proximity` mass | % of suite mass |
+|---|---|---|---|---|
+| `touch` (hitboxes overlap) | 4 036 | 96.89 | 82.9% | 22.4% |
+| `0-10` | 2 678 | 10.06 | 5.7% | 1.5% |
+| `10-40` | 3 304 | 5.40 | 3.8% | 1.0% |
+| `40-100` | 6 434 | 3.44 | 4.7% | 1.3% |
+| `100+` | 2 299 | 6.00 | 2.9% | 0.8% |
+
+So the bucket is genuinely about contact -- every non-touching band runs a mean
+of 3.4 to 10.1, which is ordinary driving error. It is also not the *bump*:
+`detect_bump_onsets` already diverts every step whose recorded position/velocity
+identity breaks, i.e. every sub-frame impulse, into the `impulse` bucket that the
+census total excludes. What is left had to be sustained overlap being pushed
+apart across a whole frame.
+
+It is neither. `RLCARC=1` measures the pair on a closed axis -- two cars of equal
+mass take the same gravity, so gravity cancels exactly in their *relative*
+velocity, and `((v_b' - v_a') - (v_b - v_a)) . n` is RL's own contact impulse with
+no simulation involved. What that dump actually shows is that **1 736 of 2 255
+overlapping pairs sit at centre separations below 38.66 UU**, the smallest Octane
+hitbox dimension and therefore closer than two hitboxes can be in *any*
+orientation. On 91% of them the separation equals exactly one tick of travel
+along the car's own velocity (`|d - speed * dt|` p50 = **0.005 UU**, float
+noise), and the pairing is structured rather than scattered: in `2v2_3` the pairs
+`[0,2]` and `[1,3]` account for 174 steps each.
+
+The raw records (`RLCARC=3`) say what it is. At tick 356 of `2v2_1` the four car
+slots carry `physics_frame` **357, 358, 358, 357** -- the cars are on different
+physics frames inside one recorded tick. Slot 1 holds slot 0's car advanced one
+frame (identical `fwd` and `up` to three decimals, velocity within 6 UU/s,
+position offset exactly one frame of travel along its own velocity), and the car
+that was really in slot 1 the tick before, 3 200 UU away, has vanished from the
+array. Slots 2 and 3 do the same. Four slots, two real cars, each duplicated a
+frame apart.
+
+`car_order::reorder_cars` is not the cause and cannot repair it: its matching is
+bijective, so when the array holds one car twice it is *forced* to file the
+copies under two different canonical slots, and it has no car to put in the
+vanished one. This is the same logger defect `detect_bump_onsets` documents from
+the other side -- "`2v2_1` cars 1 and 3 hold `|dpos|` = 38.4 UU for 18
+consecutive ticks at exactly 2300 UU/s, precisely `2 * vel * dt`" -- caught there
+per car via the `physics_frame` advance and here as disagreement *between* cars.
+
+`RLCARC=2` surveys it. The split is total:
+
+| recordings | intra-tick frame desync |
+|---|---|
+| every scripted `car_car_*` / `mech_*` | **0.0000**, spread 0 |
+| `2v2_4` | 0.047 |
+| `2v2_5` | 0.152 |
+| `2v2_3` | 0.421 |
+| `2v2_match` | 0.475 |
+| `2v2_match_3` | 0.548 |
+| `2v2_6` | 0.552 |
+| `2v2` | 0.652 |
+| `2v2_2` | 0.914 |
+| `2v2_1` | 0.926 |
+| `3v3` | **0.937** |
+
+A one-frame stagger between two *distant* cars is harmless, which is why the
+desync fraction alone is not a defect measure -- voiding every desynced tick
+would throw away most of the match-replay coverage. It matters in two specific
+ways, and `RLCENSUS=9` bands every bucket by both:
+
+- **`bad-adv`** -- the measured car's own `physics_frame` advance across the step
+  is not `stride`. The stagger flipped mid-step, so the ground truth moved two or
+  three frames while the sim was asked for one. 0.37% of steps.
+- **`dup-other`** -- the measured car advanced cleanly, but the tick holds a
+  duplicated car, so the geometry every car-car force is computed from is
+  mis-registered. 0.35% of steps.
+
+| category | steps | % steps | mean | % of suite mass |
+|---|---|---|---|---|
+| `clean` | 429 855 | 99.28% | **3.08** | 78.7% |
+| `dup-other` | 1 517 | 0.35% | **174.01** | 15.7% |
+| `bad-adv` | 1 614 | 0.37% | **58.31** | 5.6% |
+
+**0.7% of steps carry 21% of the suite's error mass, and none of it is physics.**
+Restricted to trustworthy steps the suite mean is **3.08, down 20% from 3.7512**,
+and `car_proximity` collapses: **76.2% of its mass is junk**, its clean mean is
+7.38 rather than 24.99, and its share falls from 27.1% to 8.4%. It is no longer
+the largest bucket. On clean steps the ranking is `air_boost` 20.0% (mean 5.16),
+`wall_ceiling` 16.3% (6.31), `air_free` 15.0% (1.94), `drive_throttle` 10.8%
+(1.31), then `car_proximity` 8.4%.
+
+Every single-car bucket is 0.0% junk, which is the detector validating itself:
+the defect only exists in multi-car match replays, and a collapsed array puts two
+slots in the same place, so those car-steps are all claimed by the 240 UU
+proximity net before any other bucket sees them.
+
+#### The duplicate test needs both halves
+
+Impossible proximity alone is not enough. `car_car_boost_contest` and
+`car_car_long_boost_headon` each put two cars 6 steps deep inside one another
+during a head-on boost collision. That is a real physical state RL is resolving,
+their mean error there is an ordinary 10 UU/s rather than 174, and both
+recordings are scripted with a uniform `physics_frame` on every tick. Requiring
+non-uniform frames *and* impossible proximity removes exactly those 124 units of
+false-positive mass and nothing else (`dup-other` mass 264 091 -> 263 966).
+
+Non-uniform frames alone are far too aggressive, per the table above. Use the
+conjunction.
+
+#### Not yet acted on
+
+These steps are still measured and still in the gate and census totals. Excluding
+them is a harness change that moves the baseline every earlier number in this
+document is quoted against, so it wants its own commit and a re-quote of the
+census table. The measurement is in place either way: `RLCENSUS=9` reports the
+clean-only mean any time.
+
+Counts move a few percent between runs because parallel test threads drop about
+2% of captured stdout lines; the ratios above are stable and the exact zeroes
+stay exact.
+
 ## The Accuracy Bar
 
 A case **passes** when no single simulated step diverges from the recording by
@@ -1190,6 +1316,7 @@ order/quantization, often acceptable.
 | `RLCENSUS` | `1` error-mass census by cause; `2` also lists each bucket's worst steps; `3` sub-bands by speed + handbrake state; `4` by `friction_curve_input`; `5` by suspension compression; `6` by compression x compression rate; `7` 1-UU compression bands with a quiet suspension | off |
 | `RLCTRLOFF` | shift which tick the census reads controls from (`-1`/`0`/`+1`), to re-verify control alignment | `0` |
 | `RLLATDUMP` | `1` to emit one `LATROW` per flat-floor zero-steer step: RL's own lateral friction impulse and the sim's, with per-wheel slip ratio and side impulse. See `latdump.rs` | off |
+| `RLCARC` | `1` to emit one `CARC` row per overlapping car pair: RL's own contact impulse on the closed relative-velocity axis and the sim's; `2` to survey intra-tick `physics_frame` agreement (`CARCSYNC`/`CARCADV`); `3` with `RLCARC_REC=<name> RLCARC_T=<lo>:<hi>` for a raw per-car dump. See `carcontact.rs` | off |
 | `RLTOUCH` | `1` to emit one `TOUCHROW` + `TOUCHSUSP` per landing-touchdown step: RL's own contact impulse and the sim's, with the wheel ray geometry at both ends of the step; `2` to survey the `has_world_contact` field instead. See `touchdown.rs` | off |
 | `RLSUSPDUMP` | `1` to emit one `SUSPROW` per flat-floor step: RL's own suspension impulse and the sim's, with per-wheel compression and rate. See `suspdump.rs` | off |
 | `RLTHREADS` | worker threads for the per-tick pass | all cores (≤16) |

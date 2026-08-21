@@ -50,7 +50,7 @@ fn rot_of(phys: &PhysRecord) -> Mat3A {
     )
 }
 
-fn ball_touches_car(ball_pos: Vec3A, car: &PhysRecord) -> bool {
+pub fn ball_touches_car(ball_pos: Vec3A, car: &PhysRecord) -> bool {
     let local = rot_of(car).transpose() * (ball_pos - Vec3A::from(car.pos)) - HITBOX_OFFSET;
     let d = Vec3A::new(
         (local.x.abs() - HITBOX_HALF.x).max(0.0),
@@ -60,7 +60,7 @@ fn ball_touches_car(ball_pos: Vec3A, car: &PhysRecord) -> bool {
     d.length() <= BALL_RADIUS + BALL_SLACK
 }
 
-fn is_sentinel(phys: &PhysRecord) -> bool {
+pub fn is_sentinel(phys: &PhysRecord) -> bool {
     phys.pos.z < -1000.0
 }
 
@@ -75,6 +75,114 @@ fn min_contact_z(car: &CarRecord) -> f32 {
         .filter(|w| w.has_contact)
         .map(|w| w.contact_normal.z.abs())
         .fold(1.0f32, f32::min)
+}
+
+/// Separation (UU) between two Octane hitboxes: the largest gap over the 15 SAT
+/// axes. Negative means every axis overlaps, i.e. the boxes are interpenetrating
+/// and the cars are in contact. This is a lower bound on the true distance
+/// (exact when the separating axis is a face axis), which is all the banding
+/// needs -- the only value that has to be right is the sign.
+///
+/// `car_proximity` is selected by *centre* distance under 240 UU, which is a
+/// net, not a contact test: two Octanes 240 UU apart are 120 UU of clear air
+/// apart. This is what separates "the bump is mismodelled" from "cars near each
+/// other are also cars driving hard, and the error is ordinary driving error".
+pub fn hitbox_separation(a: &PhysRecord, b: &PhysRecord) -> (f32, Vec3A) {
+    let (ra, rb) = (rot_of(a), rot_of(b));
+    let axes_a = [ra.x_axis, ra.y_axis, ra.z_axis];
+    let axes_b = [rb.x_axis, rb.y_axis, rb.z_axis];
+    let centre_a = Vec3A::from(a.pos) + ra * HITBOX_OFFSET;
+    let centre_b = Vec3A::from(b.pos) + rb * HITBOX_OFFSET;
+    let delta = centre_b - centre_a;
+
+    let half = [HITBOX_HALF.x, HITBOX_HALF.y, HITBOX_HALF.z];
+    let radius = |axes: &[Vec3A; 3], axis: Vec3A| -> f32 {
+        (0..3).map(|i| half[i] * axes[i].dot(axis).abs()).sum()
+    };
+
+    let mut best = f32::NEG_INFINITY;
+    let mut best_axis = Vec3A::Z;
+    let mut candidates = axes_a.to_vec();
+    candidates.extend_from_slice(&axes_b);
+    for x in &axes_a {
+        for y in &axes_b {
+            candidates.push(x.cross(*y));
+        }
+    }
+    for axis in candidates {
+        // A near-zero cross product means the two edges are parallel; that axis
+        // is already covered by a face axis, so dropping it loses nothing.
+        let Some(axis) = axis.try_normalize() else {
+            continue;
+        };
+        let sep = delta.dot(axis).abs() - radius(&axes_a, axis) - radius(&axes_b, axis);
+        if sep > best {
+            best = sep;
+            // Orient the axis from `a` towards `b`, so a separating impulse
+            // always *increases* `(vel_b - vel_a) . axis`.
+            best_axis = if delta.dot(axis) < 0.0 { -axis } else { axis };
+        }
+    }
+    (best, best_axis)
+}
+
+/// Scalar form, for banding.
+fn hitbox_gap(a: &PhysRecord, b: &PhysRecord) -> f32 {
+    hitbox_separation(a, b).0
+}
+
+/// Smallest Octane hitbox dimension (UU). Two identical boxes cannot have their
+/// centres closer than this in any orientation, so a live pair below it is not a
+/// physical state -- it is the logger holding one car in two slots. See
+/// `carcontact::alias_survey`.
+const MIN_HITBOX_DIM: f32 = 38.6591;
+
+/// Does this tick hold the same physical car twice?
+///
+/// Two conditions, and both are needed. Impossible proximity alone is not
+/// enough: `car_car_boost_contest` and `car_car_long_boost_headon` each put two
+/// cars 6 steps deep inside one another during a head-on boost collision, which
+/// is a real physical state RL is resolving, and their mean error there is an
+/// ordinary 10 UU/s rather than the 173 the collapsed ticks carry. Those
+/// recordings are scripted and their `physics_frame` is uniform across every
+/// single tick.
+///
+/// Non-uniform frames alone are not enough either, and are far too aggressive:
+/// the match replays sample cars one frame apart on 42% to 94% of their ticks
+/// (`RLCARC=2`), and a plain one-frame stagger between two distant cars is
+/// harmless. It only matters when it comes with the array having lost a car and
+/// duplicated another.
+fn has_duplicate_car(tick: &super::recording::tick_record::TickRecord) -> bool {
+    let live: Vec<(Vec3A, u32)> = tick
+        .car_records
+        .iter()
+        .filter(|c| !c.is_demoed && !is_sentinel(&c.phys))
+        .map(|c| (Vec3A::from(c.phys.pos), c.phys.physics_frame))
+        .collect();
+    let frames_uniform = live.windows(2).all(|w| w[0].1 == w[1].1);
+    if frames_uniform {
+        return false;
+    }
+    for i in 0..live.len() {
+        for j in (i + 1)..live.len() {
+            if (live[i].0 - live[j].0).length() < MIN_HITBOX_DIM {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Gap band for `RLCENSUS=8`. `touch` is the only band where car-car contact
+/// physics can be the cause at all.
+fn gap_band(gap: f32) -> &'static str {
+    match gap {
+        g if g <= 0.0 => "/gap:touch",
+        g if g < 10.0 => "/gap:0-10",
+        g if g < 40.0 => "/gap:10-40",
+        g if g < 100.0 => "/gap:40-100",
+        _ => "/gap:100+",
+    }
 }
 
 #[derive(Default, Clone)]
@@ -154,6 +262,12 @@ thread_local! {
     static BAND_BY_SUSP_RATE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// Set from `RLCENSUS=7`: 1-UU compression bands, quiet suspension only.
     static BAND_BY_SUSP_FINE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Set from `RLCENSUS=8`: split `car_proximity` by hitbox gap and by the
+    /// cause the step would have had if no car were nearby.
+    static BAND_BY_CAR_GAP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Set from `RLCENSUS=9`: split every bucket by how many physics frames the
+    /// measured car's own ground truth actually advanced over the step.
+    static BAND_BY_FRAME_ADV: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Secondary split of a bucket: forward speed band, plus whether the handbrake
@@ -392,6 +506,8 @@ pub fn analyze(recording: &Recording) {
     BAND_BY_SUSP.with(|b| b.set(mode == "5"));
     BAND_BY_SUSP_RATE.with(|b| b.set(mode == "6"));
     BAND_BY_SUSP_FINE.with(|b| b.set(mode == "7"));
+    BAND_BY_CAR_GAP.with(|b| b.set(mode == "8"));
+    BAND_BY_FRAME_ADV.with(|b| b.set(mode == "9"));
     // `RLCTRLOFF=n` shifts which tick the step's controls are read from, to test
     // whether the harness has the recording's control alignment right. The
     // harness assumes tick T's `prev_controls` are the controls that drove the
@@ -451,7 +567,44 @@ pub fn analyze(recording: &Recording) {
                 &rest,
                 recording.step_straddles_impulse(i, stride, j),
             );
-            let key = if sub_band {
+            let key = if BAND_BY_FRAME_ADV.with(std::cell::Cell::get) {
+                // How many physics frames this car's ground truth actually
+                // advanced. Anything but `stride` means the recording's own
+                // `from -> to` is not the step the sim was asked to take, so the
+                // divergence is the recording's, not the sim's. The match
+                // replays sample cars one frame apart (`RLCARC=2`), and when
+                // that stagger flips mid-step the advance comes out 2 or 3.
+                let adv = to.phys.physics_frame as i64 - from.phys.physics_frame as i64;
+                // A clean advance for *this* car still leaves the possibility
+                // that another car in the tick is a stale copy, which
+                // mis-registers the geometry every car-car force is computed
+                // from. Flag that separately.
+                let dup = has_duplicate_car(from_tick) || has_duplicate_car(to_tick);
+                format!("{key}/adv{adv}/{}", if dup { "dup" } else { "ok" })
+            } else if BAND_BY_CAR_GAP.with(std::cell::Cell::get) && key == "car_proximity" {
+                // Nearest other car by hitbox gap, which is not always the
+                // nearest by centre distance once the two cars sit at an angle.
+                let gap = to_tick
+                    .car_records
+                    .iter()
+                    .enumerate()
+                    .filter(|&(k, c)| k != j && !c.is_demoed && !is_car_sentinel(&c.phys))
+                    .map(|(_, c)| hitbox_gap(&to.phys, &c.phys))
+                    .fold(f32::INFINITY, f32::min);
+                // The same classification with no neighbours, to name what this
+                // step would have been filed as had proximity not claimed it
+                // first. `car_proximity/gap:100+/under:drive_throttle` is a
+                // driving step wearing a car-car label.
+                let under = bucket_of(
+                    from,
+                    to,
+                    &from_tick.ball_record,
+                    &to_tick.ball_record,
+                    &[],
+                    recording.step_straddles_impulse(i, stride, j),
+                );
+                format!("{key}{}/under:{under}", gap_band(gap))
+            } else if sub_band {
                 format!("{key}{}", band_of(from, to))
             } else {
                 key.to_string()

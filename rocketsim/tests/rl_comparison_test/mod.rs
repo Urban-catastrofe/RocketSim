@@ -13,6 +13,7 @@ use crate::rl_comparison_test::recording::Recording;
 use std::sync::OnceLock;
 
 mod car_order;
+mod carcontact;
 mod census;
 mod compare;
 mod config;
@@ -56,10 +57,11 @@ fn test_recording(recording: &Recording) {
         return;
     }
 
-    // RLCENSUS=1..4: error-mass census by cause (see census.rs).
+    // RLCENSUS=1..9: error-mass census by cause (see census.rs).
     if matches!(
         std::env::var("RLCENSUS").as_deref(),
-        Ok("1") | Ok("2") | Ok("3") | Ok("4") | Ok("5") | Ok("6") | Ok("7") | Ok("true")
+        Ok("1") | Ok("2") | Ok("3") | Ok("4") | Ok("5") | Ok("6") | Ok("7") | Ok("8") | Ok("9")
+            | Ok("true")
     ) {
         census::analyze(recording);
         return;
@@ -77,6 +79,25 @@ fn test_recording(recording: &Recording) {
     if std::env::var("RLLATDUMP").is_ok() {
         latdump::analyze(recording);
         return;
+    }
+
+    // RLCARC=1: dump the measured car-car contact impulse on overlapping steps.
+    // RLCARC=2: survey intra-tick physics_frame agreement.
+    // RLCARC=3: raw per-car dump for a tick range. See carcontact.rs.
+    match std::env::var("RLCARC").as_deref() {
+        Ok("2") => {
+            carcontact::alias_survey(recording);
+            return;
+        }
+        Ok("3") => {
+            carcontact::raw_dump(recording);
+            return;
+        }
+        Ok(_) => {
+            carcontact::analyze(recording);
+            return;
+        }
+        Err(_) => {}
     }
 
     // RLTOUCH=1: dump the measured contact impulse on landing-touchdown steps.
