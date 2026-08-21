@@ -284,7 +284,8 @@ pub fn set_state_to_record_tick(
             // A later tumble (auto-roll landing, flip afterglow) or a
             // yaw/tornado spin must NOT be re-activated.
             let av = tick.car_records[i].phys.ang_vel;
-            let hard_tumble = (av.x * av.x + av.y * av.y).sqrt() > 2.0;
+            let tumble = (av.x * av.x + av.y * av.y).sqrt();
+            let hard_tumble = tumble > 2.0;
             // Only within the flip's active phase (through the z-damp window);
             // beyond that the flip is over and has_flipped would wrongly lock
             // pitch air-control (auto_roll, flip afterglow).
@@ -292,17 +293,45 @@ pub fn set_state_to_record_tick(
             if hard_tumble && active {
                 cs.has_flipped = true;
                 cs.has_double_jumped = false;
-                // Re-open is_flipping ONLY inside the z-damp window AND while
-                // the car is actually tumbling off-vertical (a nose-down flip
-                // dives — up-dir z drops below ~0.9). A level auto-roll tumble
-                // (up-dir z ≈ 1.0) must not fire the z-damp.
+                // Re-open is_flipping only inside the z-damp window, and only
+                // for a flip still turning at essentially the car's angular
+                // speed cap. `is_flipping` makes the sim multiply `lin_vel.z` by
+                // `1 - Z_DAMP_120` = 0.65 *every tick* it is set, which is a 35%
+                // cut of vertical velocity, so a false positive here is worth
+                // hundreds of uu/s.
+                //
+                // `RLFLIP=1` measures Rocket League's own decision on the closed
+                // vertical axis (an isolated airborne car's vz is gravity plus
+                // boost plus this damp and nothing else). Inside the window,
+                // restricted to steps where the two hypotheses are separated by
+                // more than 20 uu/s so the classification is meaningful, RL
+                // damps 38% of 2476 samples -- while the previous gate admitted
+                // essentially all of them. Splitting by tumble is what separates
+                // them: `|ang_vel.xy| >= 5.0` is damped 92.4% of the time and
+                // below it 14%, against `car::MAX_ANG_SPEED` = 5.5.
+                //
+                // Cost of the damp term over those samples: 330 414 uu/s if we
+                // damp whenever the old gate allowed it, 47 429 if we never damp
+                // at all, and 24 237 with this rule.
+                //
+                // The threshold sits on a plateau, so it is not fitted to the
+                // third digit -- suite means 2.6185 at 4.8, 2.6169 at 5.0,
+                // 2.6184 at 5.2, then 2.6525 at 5.4 as real flips start being
+                // excluded.
+                //
+                // The old `0.0 < up.z < 0.9` condition is gone because it earns
+                // nothing once tumble is gated (24 126 vs 24 237) and it was not
+                // what the game keys off. Do not reinstate it without measuring.
+                //
+                // Nor should the window be widened. It is tempting, since the
+                // sim's own rule also damps a falling flipper out to
+                // `TORQUE_TIME`, but RL does not: past `Z_DAMP_END` it damps 17
+                // of 846 sharp falling samples. Widening it measured +3.56% on
+                // the suite.
+                const FLIP_DAMP_TUMBLE: f32 = 5.0;
                 let zd = rocketsim::consts::car::flip::Z_DAMP_START
                     ..=rocketsim::consts::car::flip::Z_DAMP_END;
-                let up_z = tick.car_records[i].phys.rot.rows[2].z;
-                // Right-side-up but tilted off-vertical (0 < upz < 0.9): a
-                // nose-down flip. An upside-down tumble (upz < 0, e.g. the
-                // auto-roll landing) is not a flip and must not z-damp.
-                if zd.contains(&cs.flip_time) && up_z > 0.0 && up_z < 0.9 {
+                if zd.contains(&cs.flip_time) && tumble >= FLIP_DAMP_TUMBLE {
                     cs.is_flipping = true;
                 }
             }

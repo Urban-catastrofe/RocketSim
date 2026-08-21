@@ -228,6 +228,8 @@ thread_local! {
     /// Set from `RLCENSUS=9`: split every bucket by how many physics frames the
     /// measured car's own ground truth actually advanced over the step.
     static BAND_BY_FRAME_ADV: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Set from `RLCENSUS=10`: split by the recorded jump/flip state machine.
+    static BAND_BY_AIR_STATE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Secondary split of a bucket: forward speed band, plus whether the handbrake
@@ -350,6 +352,38 @@ fn band_of(from: &CarRecord, to: &CarRecord) -> String {
         };
         return band.to_string();
     }
+    if BAND_BY_AIR_STATE.with(std::cell::Cell::get) {
+        // Which of the airborne force paths the recording says is live. The
+        // `impulse` bucket already takes the *onset* tick of a jump or flip, so
+        // anything landing here is an interior tick of one -- where the sim is
+        // driving `jump::ACCEL` or the flip's z-damping off reconstructed state
+        // (`runner::set_state_to_record_tick`) rather than off a logged field.
+        let mut tags = String::new();
+        if from.is_jumping {
+            tags.push_str("/jumping");
+        }
+        if from.is_flipping {
+            tags.push_str("/flipping");
+        }
+        if from.double_jumped_or_flipped {
+            tags.push_str("/djf");
+        }
+        if tags.is_empty() {
+            tags.push_str("/plain");
+        }
+        // Flip phase matters: `flip::Z_DAMP_START..=Z_DAMP_END` is the window
+        // where the sim cancels upward velocity, and the reconstruction has to
+        // guess whether it applies.
+        let ft = from.flip_time;
+        let phase = match ft {
+            t if t <= 0.0 => "",
+            t if t < 0.15 => "/ft0-.15",
+            t if t < 0.4 => "/ft.15-.4",
+            t if t < 0.8 => "/ft.4-.8",
+            _ => "/ft.8+",
+        };
+        return format!("{tags}{phase}");
+    }
     let speed = Vec3A::from(from.phys.lin_vel).length();
     let sb = match speed {
         s if s < 500.0 => "/v0-500",
@@ -461,13 +495,14 @@ pub fn analyze(recording: &Recording) {
     // `RLCENSUS=3` splits each bucket by forward speed and handbrake ramp
     // state, to separate "the friction model is wrong" from "the friction model
     // is wrong in one corner of its input range".
-    let sub_band = matches!(mode.as_str(), "3" | "4" | "5" | "6" | "7");
+    let sub_band = matches!(mode.as_str(), "3" | "4" | "5" | "6" | "7" | "10");
     BAND_BY_FCI.with(|b| b.set(mode == "4"));
     BAND_BY_SUSP.with(|b| b.set(mode == "5"));
     BAND_BY_SUSP_RATE.with(|b| b.set(mode == "6"));
     BAND_BY_SUSP_FINE.with(|b| b.set(mode == "7"));
     BAND_BY_CAR_GAP.with(|b| b.set(mode == "8"));
     BAND_BY_FRAME_ADV.with(|b| b.set(mode == "9"));
+    BAND_BY_AIR_STATE.with(|b| b.set(mode == "10"));
     // `RLCTRLOFF=n` shifts which tick the step's controls are read from, to test
     // whether the harness has the recording's control alignment right. The
     // harness assumes tick T's `prev_controls` are the controls that drove the

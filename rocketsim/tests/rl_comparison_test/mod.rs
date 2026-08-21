@@ -23,6 +23,7 @@ mod deep_dive;
 #[allow(dead_code)]
 mod diagnose;
 mod flat_floor;
+mod flipdamp;
 mod impulse_window;
 mod latdump;
 mod measure;
@@ -61,6 +62,7 @@ fn test_recording(recording: &Recording) {
     if matches!(
         std::env::var("RLCENSUS").as_deref(),
         Ok("1") | Ok("2") | Ok("3") | Ok("4") | Ok("5") | Ok("6") | Ok("7") | Ok("8") | Ok("9")
+            | Ok("10")
             | Ok("true")
     ) {
         census::analyze(recording);
@@ -78,6 +80,12 @@ fn test_recording(recording: &Recording) {
     // steps for the wheel friction study (see latdump.rs).
     if std::env::var("RLLATDUMP").is_ok() {
         latdump::analyze(recording);
+        return;
+    }
+
+    // RLFLIP=1: dump RL's own flip z-damp decision on airborne flip steps.
+    if std::env::var("RLFLIP").is_ok() {
+        flipdamp::analyze(recording);
         return;
     }
 

@@ -400,9 +400,11 @@ It is the same measurement as the gate, not a parallel one: it reuses
 gate's to four decimals (4.7793 vs 4.7800 over 464 471 steps). If those ever
 diverge, the census filters have drifted from the runner's.
 
-Suite-wide, 2026-08-21, after voiding the duplicated-car steps (suite mean
-**2.9981 uu/s** over 461 340 steps), excluding the 1.3% of steps the gate skips
-as unmeasurable impulse windows:
+Suite-wide, 2026-08-21, after the flip z-damp fix (suite mean **2.6169 uu/s**
+over 461 340 steps), excluding the 1.3% of steps the gate skips as unmeasurable
+impulse windows. Masses below are the pre-flip-fix ones; `air_boost` is now 113
+331 at a mean of 2.21 and `air_free` 233 073 at 1.81, so the two airborne rows
+have swapped with `wall_ceiling` at the top:
 
 | bucket | steps | mean | % of mass |
 |---|---|---|---|
@@ -1338,6 +1340,8 @@ order/quantization, often acceptable.
 | `RLCENSUS` | `1` error-mass census by cause; `2` also lists each bucket's worst steps; `3` sub-bands by speed + handbrake state; `4` by `friction_curve_input`; `5` by suspension compression; `6` by compression x compression rate; `7` 1-UU compression bands with a quiet suspension | off |
 | `RLCTRLOFF` | shift which tick the census reads controls from (`-1`/`0`/`+1`), to re-verify control alignment | `0` |
 | `RLLATDUMP` | `1` to emit one `LATROW` per flat-floor zero-steer step: RL's own lateral friction impulse and the sim's, with per-wheel slip ratio and side impulse. See `latdump.rs` | off |
+| `RLFLIP` | `1` to emit one `FLIPZ` row per isolated airborne flip step: RL's own z-damp decision on the closed vertical axis, with `flip_time`, tumble, `up.z` and both boost orderings. Filter to `0.35*|vzF| > 20` before reading. See `flipdamp.rs` | off |
+| `RLCENSUS` (`10`) | band every bucket by the recorded jump/flip state and `flip_time` phase | off |
 | `RLCARC` (`4`) | survey car-identity transpositions after an array collapse (`CARCSWAP`). Zero suite-wide; kept as a ruled-out hypothesis | off |
 | `RLKEEPDUP` | `1` to keep the duplicated-car and broken-frame-advance steps *in* the measurement instead of voiding them. They are 0.7% of steps and 21% of error mass, so this inflates every mean by ~25%; for re-measuring the artifact only | off |
 | `RLCARC` | `1` to emit one `CARC` row per overlapping car pair: RL's own contact impulse on the closed relative-velocity axis and the sim's; `2` to survey intra-tick `physics_frame` agreement (`CARCSYNC`/`CARCADV`); `3` with `RLCARC_REC=<name> RLCARC_T=<lo>:<hi>` for a raw per-car dump. See `carcontact.rs` | off |
@@ -1377,6 +1381,135 @@ Caveats:
 - Demoed/parked cars are parked far below the arena in the C++ pass (restoring
   several of them at the origin makes bullet's solver produce NaN).
 - The C++ pass never gates; it is informational only.
+
+### The Flip Z-Damp Was Firing On Almost Everything (-12.7%, RLFLIP)
+
+The largest single win so far. `RLCENSUS=10` bands every bucket by the recorded
+jump/flip state, and one band carried **6.6% of the whole suite's error mass** by
+itself:
+
+| band | n | mean | p50 | p90 | p99 | bias fwd | bias up |
+|---|---|---|---|---|---|---|---|
+| `air_boost/djf/ft.15-.4` | 6 157 | 28.04 | 0.56 | 146.5 | 266 | -13.2 | -15.7 |
+| `air_free/djf/ft.15-.4` | 13 072 | 7.38 | 4.66 | 6.32 | 145 | +0.08 | -0.17 |
+| `air_boost/djf/ft0-.15` | 4 113 | 2.47 | 0.56 | 0.56 | 45.8 | | |
+| `air_boost/djf/ft.4-.8` | 5 438 | 2.44 | 0.56 | 6.58 | 14.1 | | |
+| `air_boost/djf/ft.8+` | 11 426 | 1.19 | 0.56 | 0.56 | 4.8 | | |
+
+p50 0.56 against a mean of 28 is bimodal: most steps exact, an eighth wrong by
+150-270 uu/s. And the window is not arbitrary -- `flip::Z_DAMP_START` is 0.15.
+Inside `update_double_jump_or_flip` the sim does
+
+```text
+if is_flipping && flip_time in [Z_DAMP_START, TORQUE_TIME]
+               && (lin_vel.z < 0.0 || flip_time < Z_DAMP_END)
+{ lin_vel.z *= 1.0 - Z_DAMP_120; }      // *= 0.65, every tick
+```
+
+a 35% cut of vertical velocity per tick. Whether it fires depends entirely on
+`is_flipping`, which the recording carries only as a one-tick activation pulse,
+so `set_state_to_record_tick` has to reconstruct it. The old reconstruction
+re-opened the flag whenever `|ang_vel.xy| > 2.0` and `0 < up.z < 0.9` inside the
+window -- which is nearly every airborne tumbling car.
+
+#### The closed channel
+
+An isolated airborne car (no wheel contact, no ball, no car within 240 UU) has a
+fully determined `vz`: gravity, boost along forward, and this damp. Ordering in
+`pre_tick_update` is damp, then `update_boost`, then Bullet integrates gravity, so
+
+```text
+no damp:  vz_to == vz_from        + boost_z - g*dt
+damped:   vz_to == vz_from * 0.65 + boost_z - g*dt
+```
+
+`RLFLIP=1` emits both residuals per step (and both boost orderings) and reads
+Rocket League's own decision off the recording with no simulation involved.
+
+#### Read it only where the two hypotheses are separated
+
+**This is the trap, and it cost a wrong fix.** The two predictions differ by
+`0.35 * vz_from`. Near the apex of a jump `vz_from` is small, the difference
+collapses below float noise, and whichever residual happens to be marginally
+smaller wins -- so *every* near-apex step gets a coin-flip label. Reading the
+unfiltered table says RL damps 96.0% of falling steps out to `TORQUE_TIME`, which
+is entirely that artifact:
+
+| `\|vz_from\|` gate | `[0.21,0.65)` falling, damp% |
+|---|---|
+| none | 97.5% |
+| > 50 | 3.9% |
+| > 150 | 0.5% |
+
+Acting on the unfiltered version -- widening the reconstruction window to
+`TORQUE_TIME` and dropping the `up.z` lower bound -- measured **+3.56%** on the
+suite and was reverted. Filter to `0.35 * |vz_from| > 20 uu/s` before reading any
+of these rows.
+
+#### What Rocket League actually does
+
+On the 77 511 sharp samples:
+
+| `flip_time` | vz | n resolved | damp% |
+|---|---|---|---|
+| < 0.15 | either | 7 462 | 0.1% |
+| **0.15-0.21** | vz < 0 | 256 | **51.6%** |
+| **0.15-0.21** | vz >= 0 | 2 220 | **36.0%** |
+| 0.21-0.65 | vz < 0 | 846 | 2.0% |
+| 0.21-0.65 | vz >= 0 | 9 563 | 0.0% |
+| > 0.65 | either | 52 317 | 0.0% |
+
+So the window really is `[0.15, 0.21]` and nothing else -- the sim's `vel.z < 0`
+extension out to 0.65 does not correspond to anything RL does. Inside the window
+RL damps only **38%**, while the old gate damped essentially all of it. The
+dominant failure was the sim damping when RL did not: 1 545 steps at mean 110.5.
+
+#### Tumble is the discriminator
+
+`|ang_vel.xy|` against `car::MAX_ANG_SPEED` = 5.5:
+
+| tumble | n | damp% |
+|---|---|---|
+| <= 2.0 | 374 | 2.4% |
+| 2.0-5.0 | 1 313 | 14.7% |
+| 5.0-5.45 | 476 | 89.1% |
+| >= 5.45 | 313 | 97.4% |
+
+A flip still driving the damp is turning at essentially the cap. Cost of the damp
+term over those samples -- damp on every step the old gate allowed: **330 414**;
+never damp at all: 47 429; `tumble >= 5.0`: **24 237**. The `up.z` test earns
+nothing once tumble is gated (24 126 with it, 24 237 without) and is removed.
+
+The threshold sits on a plateau rather than an edge, so it is not fitted to the
+third digit: suite mean 2.6185 at 4.8, **2.6169 at 5.0**, 2.6184 at 5.2, then
+2.6525 at 5.4 as real flips start being excluded.
+
+#### Result
+
+**Suite mean 2.9981 -> 2.6169, -12.7%**, gate unchanged at 45 passing.
+
+| bucket | mass before | mass after | change |
+|---|---|---|---|
+| `air_boost` | 264 715 | 113 331 | **-57%** (mean 5.16 -> 2.21) |
+| `air_free` | 249 381 | 233 073 | -6.5% |
+| `car_proximity` | 116 208 | 106 583 | -8.3% |
+| `wall_ceiling` | 216 116 | 217 510 | +0.6% |
+
+Everything grounded is untouched to the digit, which is the check that this only
+moved airborne physics. `wall_ceiling` giving back 0.6% is the one regression and
+is small enough to leave.
+
+#### Still open
+
+Inside the window, `tumble` between 2 and 5 is a 14% coin flip and still carries
+the residue. The likely cause is that `|ang_vel.xy|` is a *world*-frame magnitude
+and so conflates flip tumble with air roll, which players hold constantly (the
+powerslide button *is* air roll -- which is also why `RLCENSUS=3` shows the
+airborne error concentrated on the `hb-ramp` band, where a handbrake means
+nothing physically). Comparing angular velocity against the recorded
+`flip_rel_torque` axis in the car frame should separate a real dodge from a roll;
+`flip_rel_torque` is live in the recording, normalised to 1, while `has_flip` and
+the `is_flipping` pulse are both dead on every one of these steps.
 
 ### Why The 2 s Rollout Collapses, And Where The Signal Is
 
