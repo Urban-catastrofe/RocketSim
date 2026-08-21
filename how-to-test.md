@@ -948,11 +948,28 @@ suite. Three results, all unambiguous:
 
 | measurement | result |
 |---|---|
-| car-ticks with **no** wheel in contact where `has_world_contact` is true | **0** of 183 257 |
-| steady wheel-contact ticks where it is true | 238 076 of 254 180 (93.7%) |
-| **touchdown** ticks (0 wheels -> 1+) where it is true | 37 of 1292 (**2.9%**) |
-| logged `world_contact_point` away from the origin | **0** of 238 076 |
-| logged `world_contact_normal` not exactly `+z` | **0** of 238 076 |
+| car-ticks with **no** wheel in contact where `has_world_contact` is true | **0** of 193 339 |
+| steady wheel-contact ticks where it is true | 254 252 of 271 516 (93.6%) |
+| **touchdown** ticks (0 wheels -> 1+) where it is true | 40 of 1383 (**2.9%**) |
+| logged `world_contact_point` away from the origin | **0** of 254 252 |
+| logged `world_contact_normal` not exactly `+z` | **0** of 254 252 |
+| *control:* wheel-contact ticks with a **`WheelRecord`** normal off the flat floor | 43 270 of 271 516 (15.9%) |
+| *control:* wheel-contact ticks with `min_contact_z < 0.9` | 37 421 (13.8%) |
+| *control:* wheel-contact ticks with a wheel normal `z < 0` (ceiling) | 4 521 |
+
+The last three rows are the control, and they are why this is a statement about
+one field rather than about the observer. The **`WheelRecord`** contact normals
+are a different field from the `PhysRecord` one and they are **live**: 15.9% of
+contact ticks are off the flat floor, and `min_contact_z < 0.9` - the exact
+condition `wall_ceiling` is defined on - holds on 37 421 of them, which is the
+census's 34 330 plus the steps earlier buckets claim. **`wall_ceiling` does not
+share this defect.** Only the three `PhysRecord` world-contact fields are dead.
+
+Counts are approximate to about 2%: under parallel test threads a small fraction
+of `println!` lines are lost from the captured stdout, so repeat runs vary
+(437 k-465 k car-ticks). The *ratios* are stable across runs, and the exact
+zeroes are exact - a lost line can only lower a count, never turn a nonzero into
+a zero.
 
 So the flag never reports a chassis-only contact - it tracks *wheel* contact, and
 it lags it by a tick. The bucket condition was
@@ -962,8 +979,8 @@ therefore the 3% of landing touchdowns where the lagging flag happened to be on
 time - a biased sample of a completely different mechanism, wearing the name of
 one this dataset never records. **Two more observer fields are dead as well:**
 `world_contact_point` is the origin and `world_contact_normal` is exactly `+z` on
-every one of 238 076 logged contacts, including the suite's thousands of wall and
-ceiling steps. Infer nothing from either.
+every one of 254 252 logged contacts, including the suite's thousands of wall and
+ceiling steps. Infer nothing from any of the three.
 
 The bucket is gone. `wheel_transition` now splits three ways instead, on what
 actually changed, and the split is worth having:
@@ -1021,13 +1038,44 @@ moved sideways in time. (The model transcription itself is sound: evaluated at
 the start pose it reproduces the sim's measured `dv_z` with p50 -0.004 and mean
 \|residual\| 0.409 uu/s.)
 
-**The open item** is therefore sub-tick contact onset: when the ray misses at the
-start of the tick but the wheel will reach the ground within it, apply the
-suspension force scaled by the fraction of the tick actually spent in contact.
-That is a local change to `prepare_for_raycast` / `apply_ray_cast`, and the
-`touchdown` bucket plus `RLTOUCH=1` now score it directly. Sizing first: the
-whole bucket is 1.2% of suite mass, and `wheel_transition` another 2.3%, so this
-is worth about 1% of the suite mean at best - do the cheap version.
+#### Sub-Tick Contact Onset Was Tried And Does Not Pay
+
+The implied fix is sub-tick onset: lengthen the wheel ray by the distance the
+hardpoint will descend this tick, and when the hit lies beyond the travel limit
+charge the wheel only the fraction of a tick it was actually in contact for -
+mean compression running from `-MAX_SUSPENSION_TRAVEL` (fully extended, which is
+what first contact means) to wherever the closure reaches, with
+`update_suspension`'s stiffness, damping branch, force scale and zero-clamp
+otherwise untouched. It was implemented and measured. **It made the suite worse
+by +0.42%** (3.7512 -> 3.7669) and it is reverted. Two reasons, both worth
+keeping:
+
+1. **It fires on far wheels while near wheels already have contact.** `predF` is
+   a per-car count but the onset is per-wheel, so on a pitched landing the
+   trailing wheel gets an onset impulse on top of the leading wheel's ordinary
+   suspension. On those steps the sim was **already right** (RL +64.2 against the
+   sim's +62.0), and the onset tripled it. Restricting the onset to cars with no
+   wheel in contact at all fixes this, and is clearly correct - never augment a
+   case that already matches.
+2. **Even correctly scoped it overshoots by 2x.** On the 152 no-wheel-contact
+   steps where it fires, `sim/RL` has p25 1.41, **p50 1.98**, p75 2.48, and 113 of
+   152 overshoot by more than 1.5x. Net error moves only -3.0%, because "0 where
+   RL says 10.2" is replaced by "17.6 where RL says 10.2". On the other 137 steps
+   it stays silent and RL's own mean is +0.58, so those were already fine.
+
+The factor of two is real and repeatable but has **no mechanism behind it**. It is
+not the spring ramp (mean compression already handles that), not velocity decay
+during the tick (the damping time constant is ~24 ticks, so 2.5% over the
+fraction), and not the tilt factor (which reduces the term). Halving the impulse
+would fit one constant to 152 rows against an unknown cause - the same mistake
+the `LAT_FRICTION` bimodality warned about, where the missing variable was not in
+the recording at all. **Do not add the 0.5.**
+
+Sizing says stop here regardless: `touchdown` is 1.2% of suite mass, so even a
+*perfect* landing tick is worth 1.2% of the suite mean, and the correctly scoped
+onset captures 3% of that. The measurement infrastructure (`RLTOUCH=1`, the
+`touchdown` bucket) is kept because it scores any future attempt in one run, and
+the 2x overshoot is the number that attempt should start from.
 
 ## The Accuracy Bar
 

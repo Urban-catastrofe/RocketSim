@@ -4,19 +4,25 @@
 //! This pass started out as a chassis-scrape study, aimed at the `body_scrape`
 //! census bucket. That bucket turned out not to exist. `RLTOUCH=2` surveys the
 //! field it was built on and finds `phys.has_world_contact` true on **zero** of
-//! 183,257 car-ticks with no wheel in contact, so the bucket condition
+//! 193,339 car-ticks with no wheel in contact, so the bucket condition
 //! `nw_from == 0 && (from.has_world_contact || to.has_world_contact)` could only
 //! ever fire through its `to` term. And the flag lags contact: it is true on
-//! 93.7% of steady wheel-contact ticks but only **2.9%** of touchdown ticks
-//! (37 of 1292). So `body_scrape` was a 3% sample of landings, selected by that
+//! 93.6% of steady wheel-contact ticks but only **2.9%** of touchdown ticks
+//! (40 of 1383). So `body_scrape` was a 3% sample of landings, selected by that
 //! lag, wearing the name of a mechanism this dataset never records. It is gone;
 //! its steps belong to the `touchdown` bucket that replaced it.
 //!
-//! The survey also retires two observer fields: across 238,076 logged contacts
-//! `world_contact_point` is the origin every single time and
+//! The survey also retires two more observer fields: across 254,252 logged
+//! contacts `world_contact_point` is the origin every single time and
 //! `world_contact_normal` is exactly `+z` every single time, including the
-//! thousands of wall and ceiling steps in the suite. Neither carries
-//! information. Nothing should be inferred from either.
+//! suite's thousands of wall and ceiling steps. Infer nothing from any of the
+//! three.
+//!
+//! This is a statement about those three fields, not about the observer. The
+//! **`WheelRecord`** contact normals are a different field and they are live -
+//! 15.9% of contact ticks are off the flat floor and `min_contact_z < 0.9` holds
+//! on 37,421 of them - so the `wall_ceiling` bucket, which is defined on those,
+//! does **not** share the defect.
 //!
 //! So this pass measures what those steps actually are. On the touchdown tick
 //! the vertical axis is closed in the same sense as [`super::suspdump`], but
@@ -283,15 +289,28 @@ pub fn analyze(recording: &Recording) {
 ///
 /// ```text
 /// SURVEY <recording> ticks=<n> hwc=<n> nw0=<n> nw0_hwc=<n> nw4_hwc=<n>
-///        nrm_off_flat=<n> pt_nonzero=<n>
+///        nrm_off_flat=<n> pt_nonzero=<n> touch=<n> touch_hwc=<n>
+///        nw_pos=<n> nw_pos_hwc=<n> wheel_nrm_off_flat=<n>
+///        wheel_below_floor_thresh=<n> wheel_nrm_negative=<n>
 /// ```
 ///
-/// `nw0` is car-ticks with no wheel in contact, `nrm_off_flat` logged normals
-/// that are not exactly `+z`, `pt_nonzero` logged contact points away from the
-/// origin. `touch` counts touchdown steps and `touch_hwc` how many of them the
-/// `body_scrape` bucket could even see; `nw_pos_hwc / nw_pos` is how faithfully
-/// the flag tracks wheel contact in the steady state. The suite result is in the
-/// module docs above.
+/// `nw0` is car-ticks with no wheel in contact, `nrm_off_flat` logged
+/// `phys.world_contact_normal`s that are not exactly `+z`, `pt_nonzero` logged
+/// `phys.world_contact_point`s away from the origin. `touch` counts touchdown
+/// steps and `touch_hwc` how many of them the old `body_scrape` bucket could
+/// even see; `nw_pos_hwc / nw_pos` is how faithfully the flag tracks wheel
+/// contact in the steady state.
+///
+/// The `wheel_*` counters are the control, and they matter: the *`WheelRecord`*
+/// contact normals are a different field from the `PhysRecord` one, and they are
+/// **live**. `wheel_below_floor_thresh` reproduces `census::min_contact_z`
+/// exactly, so it confirms the `wall_ceiling` bucket rests on real data rather
+/// than sharing `body_scrape`'s defect. `RLTOUCH_DUMP=1` prints the raw per-wheel
+/// normals for a spot check. The suite results are in the module docs above.
+///
+/// Keep this one `println!` on one physical line. An earlier version wrapped it
+/// and the aggregation, which greps `^SURVEY`, silently read the wrapped
+/// counters as absent - which looks identical to their being zero.
 pub fn survey(recording: &Recording) {
     let num_cars = recording.info.num_cars as usize;
     if num_cars == 0 {
@@ -299,7 +318,8 @@ pub fn survey(recording: &Recording) {
     }
     let stride = recording.stride;
     let (mut ticks, mut hwc, mut nw0, mut nw0_hwc, mut nw4_hwc) = (0u32, 0u32, 0u32, 0u32, 0u32);
-    let (mut nrm_off_flat, mut pt_nonzero) = (0u32, 0u32);
+    let (mut nrm_off_flat, mut pt_nonzero, mut wheel_nrm_off_flat) = (0u32, 0u32, 0u32);
+    let (mut wheel_below_floor_thresh, mut wheel_nrm_negative) = (0u32, 0u32);
     let (mut touch, mut touch_hwc, mut nw_pos, mut nw_pos_hwc) = (0u32, 0u32, 0u32, 0u32);
 
     let last = recording.ticks.len().saturating_sub(stride + 1);
@@ -331,6 +351,55 @@ pub fn survey(recording: &Recording) {
                 if from.phys.has_world_contact {
                     nw_pos_hwc += 1;
                 }
+                // The *wheel* contact normals are a separate field, and
+                // `wall_ceiling` is defined on them. Count how often they leave
+                // the flat floor: if this were also zero, that bucket would be a
+                // phantom too. It is not - see the module docs.
+                if from
+                    .wheels
+                    .iter()
+                    .any(|w| w.has_contact && w.contact_normal.z.abs() < 0.999)
+                {
+                    wheel_nrm_off_flat += 1;
+                }
+                // Exactly what `census::min_contact_z` computes, so the two
+                // cannot disagree about what the field holds.
+                let mcz = from
+                    .wheels
+                    .iter()
+                    .filter(|w| w.has_contact)
+                    .map(|w| w.contact_normal.z.abs())
+                    .fold(1.0f32, f32::min);
+                if mcz < 0.9 {
+                    wheel_below_floor_thresh += 1;
+                }
+                if std::env::var("RLTOUCH_DUMP").is_ok() {
+                    let n: Vec<String> = from
+                        .wheels
+                        .iter()
+                        .map(|w| {
+                            format!(
+                                "{}({:.3},{:.3},{:.3})",
+                                u8::from(w.has_contact),
+                                w.contact_normal.x,
+                                w.contact_normal.y,
+                                w.contact_normal.z
+                            )
+                        })
+                        .collect();
+                    println!(
+                        "NRM {} {i} {j} mcz={mcz:.4} {}",
+                        recording.name,
+                        n.join(" ")
+                    );
+                }
+                if from
+                    .wheels
+                    .iter()
+                    .any(|w| w.has_contact && w.contact_normal.z < 0.0)
+                {
+                    wheel_nrm_negative += 1;
+                }
             }
             let nw = wheels_in_contact(from);
             if nw == 0 {
@@ -354,8 +423,7 @@ pub fn survey(recording: &Recording) {
         }
     }
     println!(
-        "SURVEY {} ticks={ticks} hwc={hwc} nw0={nw0} nw0_hwc={nw0_hwc} nw4_hwc={nw4_hwc} \
-         nrm_off_flat={nrm_off_flat} pt_nonzero={pt_nonzero} touch={touch}          touch_hwc={touch_hwc} nw_pos={nw_pos} nw_pos_hwc={nw_pos_hwc}",
+        "SURVEY {} ticks={ticks} hwc={hwc} nw0={nw0} nw0_hwc={nw0_hwc} nw4_hwc={nw4_hwc} nrm_off_flat={nrm_off_flat} pt_nonzero={pt_nonzero} touch={touch} touch_hwc={touch_hwc} nw_pos={nw_pos} nw_pos_hwc={nw_pos_hwc} wheel_nrm_off_flat={wheel_nrm_off_flat} wheel_below_floor_thresh={wheel_below_floor_thresh} wheel_nrm_negative={wheel_nrm_negative}",
         recording.name,
     );
 }
