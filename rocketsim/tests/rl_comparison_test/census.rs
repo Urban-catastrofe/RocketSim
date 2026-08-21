@@ -27,7 +27,9 @@ use rocketsim::CarControls;
 
 use super::recording::Recording;
 use super::recording::cpp_records::{CarRecord, PhysRecord};
-use super::runner::{has_discontinuity, is_car_sentinel, make_arena, set_state_to_record_tick};
+use super::runner::{
+    has_discontinuity, has_duplicate_car, is_car_sentinel, make_arena, set_state_to_record_tick,
+};
 
 /// Octane hitbox, inflated by the ball radius, as in `residual.rs`.
 const HITBOX_HALF: Vec3A = Vec3A::new(120.507 / 2.0, 86.6994 / 2.0, 38.6591 / 2.0);
@@ -129,48 +131,6 @@ pub fn hitbox_separation(a: &PhysRecord, b: &PhysRecord) -> (f32, Vec3A) {
 /// Scalar form, for banding.
 fn hitbox_gap(a: &PhysRecord, b: &PhysRecord) -> f32 {
     hitbox_separation(a, b).0
-}
-
-/// Smallest Octane hitbox dimension (UU). Two identical boxes cannot have their
-/// centres closer than this in any orientation, so a live pair below it is not a
-/// physical state -- it is the logger holding one car in two slots. See
-/// `carcontact::alias_survey`.
-const MIN_HITBOX_DIM: f32 = 38.6591;
-
-/// Does this tick hold the same physical car twice?
-///
-/// Two conditions, and both are needed. Impossible proximity alone is not
-/// enough: `car_car_boost_contest` and `car_car_long_boost_headon` each put two
-/// cars 6 steps deep inside one another during a head-on boost collision, which
-/// is a real physical state RL is resolving, and their mean error there is an
-/// ordinary 10 UU/s rather than the 173 the collapsed ticks carry. Those
-/// recordings are scripted and their `physics_frame` is uniform across every
-/// single tick.
-///
-/// Non-uniform frames alone are not enough either, and are far too aggressive:
-/// the match replays sample cars one frame apart on 42% to 94% of their ticks
-/// (`RLCARC=2`), and a plain one-frame stagger between two distant cars is
-/// harmless. It only matters when it comes with the array having lost a car and
-/// duplicated another.
-fn has_duplicate_car(tick: &super::recording::tick_record::TickRecord) -> bool {
-    let live: Vec<(Vec3A, u32)> = tick
-        .car_records
-        .iter()
-        .filter(|c| !c.is_demoed && !is_sentinel(&c.phys))
-        .map(|c| (Vec3A::from(c.phys.pos), c.phys.physics_frame))
-        .collect();
-    let frames_uniform = live.windows(2).all(|w| w[0].1 == w[1].1);
-    if frames_uniform {
-        return false;
-    }
-    for i in 0..live.len() {
-        for j in (i + 1)..live.len() {
-            if (live[i].0 - live[j].0).length() < MIN_HITBOX_DIM {
-                return true;
-            }
-        }
-    }
-    false
 }
 
 /// Gap band for `RLCENSUS=8`. `touch` is the only band where car-car contact

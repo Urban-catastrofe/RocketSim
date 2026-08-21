@@ -7,12 +7,14 @@
 //! - [`run_continuous`] sets state once at tick 0 and runs freely, showing how
 //!   errors compound. Informational only.
 
-use rocketsim::{Arena, BallState, CarBodyConfig, CarControls, CarState, GameMode, PhysState, Team};
+use rocketsim::{
+    Arena, BallState, CarBodyConfig, CarControls, CarState, GameMode, PhysState, Team,
+};
 
 use super::config::HarnessConfig;
 use super::measure::compute_delta;
 use super::recording::Recording;
-use super::recording::cpp_records::PhysRecord;
+use super::recording::cpp_records::{CarRecord, PhysRecord};
 use super::recording::tick_record::TickRecord;
 use super::report::Report;
 use super::stats::Field;
@@ -66,11 +68,118 @@ const MAX_PHYS_DISPLACEMENT: f32 = 100.0;
 /// because each shard dropped its own first two ticks.
 pub const SHARD_WARMUP_TICKS: usize = 2;
 
-/// True if the recording's `i -> i + stride` transition is non-physical (any
-/// car or the ball jumps farther than [`MAX_PHYS_DISPLACEMENT`]).
+/// Smallest Octane hitbox dimension (UU): 38.6591 tall, against 120.507 long and
+/// 86.6994 wide. Two identical boxes cannot have their centres closer than the
+/// smallest dimension in any orientation whatsoever, so a live pair below it is
+/// not a physical state.
+const MIN_HITBOX_DIM: f32 = 38.6591;
+
+/// Is this car's record real ground truth this tick? A demoed car is parked by
+/// the logger, either at the origin or below the floor.
+fn car_live(car: &CarRecord) -> bool {
+    !car.is_demoed && car.phys.pos.z > -1000.0 && !is_car_sentinel(&car.phys)
+}
+
+/// True if this tick's live cars do not all share one `physics_frame`.
+///
+/// The match replays sample cars asynchronously, so this is *common* and mostly
+/// harmless: `2v2_4` runs 4.7% of ticks and `3v3` 93.7%, and a one-frame stagger
+/// between two cars 3000 UU apart changes nothing. Every scripted recording is
+/// at exactly 0.0000. On its own this is not a defect and must not void a tick.
+fn frames_disagree(tick: &TickRecord) -> bool {
+    let mut seen: Option<u32> = None;
+    for car in tick.car_records.iter().filter(|c| car_live(c)) {
+        match seen {
+            None => seen = Some(car.phys.physics_frame),
+            Some(f) if f != car.phys.physics_frame => return true,
+            _ => {}
+        }
+    }
+    false
+}
+
+/// True if this tick holds the same physical car in two slots.
+///
+/// When the logger's array rotates it can write one car into two slots a frame
+/// apart and lose another car entirely. At tick 356 of `2v2_1` the four slots
+/// carry `physics_frame` 357, 358, 358, 357; slot 1 holds slot 0's car advanced
+/// one frame (same `fwd` and `up` to three decimals, velocity within 6 UU/s,
+/// centre offset exactly one frame of travel along its own velocity) and the car
+/// that was in slot 1 the tick before, 3200 UU away, is gone. `car_order` cannot
+/// repair it: its matching is bijective, so it is forced to file both copies
+/// under separate canonical slots with nothing to put in the vacated one.
+///
+/// Both halves of the test are needed. Impossible proximity alone
+/// false-positives on `car_car_boost_contest` and `car_car_long_boost_headon`,
+/// which each spend 6 steps genuinely interpenetrating during a head-on boost
+/// collision -- a real state RL is resolving, at an ordinary 10 UU/s of error
+/// rather than the 174 the collapsed ticks carry -- and both are scripted with a
+/// uniform `physics_frame` on every tick. Requiring disagreeing frames as well
+/// removes exactly those false positives and nothing else.
+pub fn has_duplicate_car(tick: &TickRecord) -> bool {
+    if !frames_disagree(tick) {
+        return false;
+    }
+    let live: Vec<glam::Vec3A> = tick
+        .car_records
+        .iter()
+        .filter(|c| car_live(c))
+        .map(|c| c.phys.pos.into())
+        .collect();
+    for i in 0..live.len() {
+        for j in (i + 1)..live.len() {
+            if (live[i] - live[j]).length() < MIN_HITBOX_DIM {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// True if any live car's own ground truth did not advance exactly `stride`
+/// physics frames across the step.
+///
+/// The per-car frame stagger is harmless while it holds steady, because the
+/// car's own `from -> to` is still one frame. When it *flips* mid-step the
+/// recording moved two or three frames while the sim is asked for one, and the
+/// resulting divergence is arithmetic, not physics: those steps average 58 UU/s
+/// against the suite's 3.
+fn frame_advance_broken(from: &TickRecord, to: &TickRecord, stride: usize) -> bool {
+    for (fc, tc) in from.car_records.iter().zip(&to.car_records) {
+        if !car_live(fc) || !car_live(tc) {
+            continue;
+        }
+        if tc.phys.physics_frame != fc.phys.physics_frame + stride as u32 {
+            return true;
+        }
+    }
+    false
+}
+
+/// `RLKEEPDUP=1` keeps the steps [`has_duplicate_car`] and
+/// [`frame_advance_broken`] reject *in* the measurement, so the mass they carry
+/// can be re-measured after the fact. They are 0.7% of the suite's steps and 21%
+/// of its error mass, so leaving them in inflates every reported mean by ~25%.
+fn keep_corrupt_steps() -> bool {
+    static KEEP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *KEEP.get_or_init(|| matches!(std::env::var("RLKEEPDUP").as_deref(), Ok("1") | Ok("true")))
+}
+
+/// True if the recording's `i -> i + stride` transition is non-physical: any car
+/// or the ball jumps farther than [`MAX_PHYS_DISPLACEMENT`], a car's own
+/// `physics_frame` does not advance by `stride`, or the tick holds one physical
+/// car in two slots.
 pub fn has_discontinuity(recording: &Recording, i: usize, stride: usize) -> bool {
     let from = &recording.ticks[i];
     let to = &recording.ticks[i + stride];
+
+    if !keep_corrupt_steps()
+        && (frame_advance_broken(from, to, stride)
+            || has_duplicate_car(from)
+            || has_duplicate_car(to))
+    {
+        return true;
+    }
 
     for (fc, tc) in from.car_records.iter().zip(&to.car_records) {
         let a: glam::Vec3A = fc.phys.pos.into();
@@ -187,7 +296,8 @@ pub fn set_state_to_record_tick(
                 // the car is actually tumbling off-vertical (a nose-down flip
                 // dives — up-dir z drops below ~0.9). A level auto-roll tumble
                 // (up-dir z ≈ 1.0) must not fire the z-damp.
-                let zd = rocketsim::consts::car::flip::Z_DAMP_START..=rocketsim::consts::car::flip::Z_DAMP_END;
+                let zd = rocketsim::consts::car::flip::Z_DAMP_START
+                    ..=rocketsim::consts::car::flip::Z_DAMP_END;
                 let up_z = tick.car_records[i].phys.rot.rows[2].z;
                 // Right-side-up but tilted off-vertical (0 < upz < 0.9): a
                 // nose-down flip. An upside-down tumble (upz < 0, e.g. the

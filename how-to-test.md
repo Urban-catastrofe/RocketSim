@@ -400,24 +400,31 @@ It is the same measurement as the gate, not a parallel one: it reuses
 gate's to four decimals (4.7793 vs 4.7800 over 464 471 steps). If those ever
 diverge, the census filters have drifted from the runner's.
 
-Suite-wide, 2026-08-20, after the handbrake-ramp fix (suite mean 3.8056 uu/s),
-excluding the 1.3% of steps the gate skips as unmeasurable impulse windows:
+Suite-wide, 2026-08-21, after voiding the duplicated-car steps (suite mean
+**2.9981 uu/s** over 461 340 steps), excluding the 1.3% of steps the gate skips
+as unmeasurable impulse windows:
 
 | bucket | steps | mean | % of mass |
 |---|---|---|---|
-| `car_proximity` | 4.0% | 25.21 | 26.7% |
-| `air_boost` | 11.1% | 5.16 | 15.0% |
-| `air_free` | 27.8% | 1.93 | 14.1% |
-| `wall_ceiling` | 7.4% | 6.41 | 12.5% |
-| `drive_throttle` | 23.5% | 1.35 | 8.3% |
-| `ball_contact` | 1.3% | 15.52 | 5.4% |
-| `drive_handbrake` | 8.2% | 1.90 | 4.1% |
-| `drive_partial` | 2.6% | 6.07 | 4.1% |
-| `drive_boost` | 8.9% | 1.70 | 4.0% |
-| `wheel_transition` | 1.1% | 12.93 | 3.7% |
-| `drive_coast` | 4.2% | 1.91 | 2.1% |
+| `air_boost` | 11.1% | 5.16 | 19.1% |
+| `air_free` | 28.0% | 1.93 | 18.0% |
+| `wall_ceiling` | 7.4% | 6.30 | 15.6% |
+| `drive_throttle` | 23.6% | 1.30 | 10.3% |
+| `car_proximity` | 3.4% | 7.40 | 8.4% |
+| `ball_contact` | 1.3% | 15.27 | 6.7% |
+| `drive_partial` | 2.6% | 5.98 | 5.1% |
+| `drive_boost` | 8.9% | 1.61 | 4.8% |
+| `drive_handbrake` | 8.3% | 1.73 | 4.8% |
+| `wheel_transition` | 0.6% | 14.05 | 2.9% |
+| `drive_coast` | 4.2% | 1.81 | 2.5% |
+| `touchdown` | 0.3% | 16.93 | 1.5% |
+| `liftoff` | 0.2% | 2.91 | 0.2% |
 
-**This table is measured over corrupted steps.** 0.7% of the suite's steps carry 21% of its error mass purely because the match replays sometimes hold one car in two slots; `car_proximity` above is 76% that artifact. See *Three Quarters of `car_proximity` Is Corrupted Ground Truth* below for the clean ranking.
+Until 2026-08-21 this table read `car_proximity` 26.7% at a mean of 25.21, which
+made it the largest bucket by a wide margin and the obvious next target. Three
+quarters of that was the recording holding one car in two slots; see *Three
+Quarters of `car_proximity` Is Corrupted Ground Truth* below. `RLKEEPDUP=1`
+reproduces the old numbers exactly (464 471 steps, 3.7512) if you need them.
 
 There was a twelfth bucket, `body_scrape`, at 34 steps and 0.04% of mass. It has
 been deleted: the field it was built on cannot express what it claimed to
@@ -1166,7 +1173,7 @@ ways, and `RLCENSUS=9` bands every bucket by both:
 | `bad-adv` | 1 614 | 0.37% | **58.31** | 5.6% |
 
 **0.7% of steps carry 21% of the suite's error mass, and none of it is physics.**
-Restricted to trustworthy steps the suite mean is **3.08, down 20% from 3.7512**,
+Voiding them takes the suite mean to **2.9981, down 20.1% from 3.7512**,
 and `car_proximity` collapses: **76.2% of its mass is junk**, its clean mean is
 7.38 rather than 24.99, and its share falls from 27.1% to 8.4%. It is no longer
 the largest bucket. On clean steps the ranking is `air_boost` 20.0% (mean 5.16),
@@ -1191,13 +1198,28 @@ false-positive mass and nothing else (`dup-other` mass 264 091 -> 263 966).
 Non-uniform frames alone are far too aggressive, per the table above. Use the
 conjunction.
 
-#### Not yet acted on
+#### Fixed: these steps are voided (-20.1%)
 
-These steps are still measured and still in the gate and census totals. Excluding
-them is a harness change that moves the baseline every earlier number in this
-document is quoted against, so it wants its own commit and a re-quote of the
-census table. The measurement is in place either way: `RLCENSUS=9` reports the
-clean-only mean any time.
+`runner::has_discontinuity` now rejects a step when the tick holds a duplicated
+car or when any live car's own `physics_frame` advance is not `stride`. That is
+the right home for it: `has_discontinuity` is the single tick-wide void shared by
+the runner, the census, the C++ comparison pass and the impulse windows, so all
+four inherit the fix without a second definition to keep in step.
+
+Result over the suite: **3.7512 -> 2.9981 uu/s (-20.1%)**, 3 131 of 464 471 steps
+voided, gate unchanged at 45 passing. Every single-car bucket's mass is identical
+to the last digit (`air_boost` 264 715, `air_free` 249 381, `wall_ceiling`
+216 116, `drive_partial` 70 978), which is the check that this removed only
+multi-car corruption: `car_proximity` loses 75.4% of its mass while the other
+buckets lose only the far-away cars that happened to share a collapsed tick.
+
+`RLKEEPDUP=1` puts them back and reproduces the old totals exactly (464 471
+steps, 3.7512). Use it to re-measure the artifact, never to report a number.
+
+Both tests must stay tick-wide. The frame-advance break is per car, but the array
+collapse is whole-array -- when it happens every slot is affected in the same
+tick -- so voiding per car would leave the mis-registered geometry in place for
+the cars that still advanced cleanly.
 
 Counts move a few percent between runs because parallel test threads drop about
 2% of captured stdout lines; the ratios above are stable and the exact zeroes
@@ -1316,6 +1338,7 @@ order/quantization, often acceptable.
 | `RLCENSUS` | `1` error-mass census by cause; `2` also lists each bucket's worst steps; `3` sub-bands by speed + handbrake state; `4` by `friction_curve_input`; `5` by suspension compression; `6` by compression x compression rate; `7` 1-UU compression bands with a quiet suspension | off |
 | `RLCTRLOFF` | shift which tick the census reads controls from (`-1`/`0`/`+1`), to re-verify control alignment | `0` |
 | `RLLATDUMP` | `1` to emit one `LATROW` per flat-floor zero-steer step: RL's own lateral friction impulse and the sim's, with per-wheel slip ratio and side impulse. See `latdump.rs` | off |
+| `RLKEEPDUP` | `1` to keep the duplicated-car and broken-frame-advance steps *in* the measurement instead of voiding them. They are 0.7% of steps and 21% of error mass, so this inflates every mean by ~25%; for re-measuring the artifact only | off |
 | `RLCARC` | `1` to emit one `CARC` row per overlapping car pair: RL's own contact impulse on the closed relative-velocity axis and the sim's; `2` to survey intra-tick `physics_frame` agreement (`CARCSYNC`/`CARCADV`); `3` with `RLCARC_REC=<name> RLCARC_T=<lo>:<hi>` for a raw per-car dump. See `carcontact.rs` | off |
 | `RLTOUCH` | `1` to emit one `TOUCHROW` + `TOUCHSUSP` per landing-touchdown step: RL's own contact impulse and the sim's, with the wheel ray geometry at both ends of the step; `2` to survey the `has_world_contact` field instead. See `touchdown.rs` | off |
 | `RLSUSPDUMP` | `1` to emit one `SUSPROW` per flat-floor step: RL's own suspension impulse and the sim's, with per-wheel compression and rate. See `suspdump.rs` | off |
