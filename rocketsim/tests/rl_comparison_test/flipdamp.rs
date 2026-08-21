@@ -88,6 +88,14 @@ const DAMP: f32 = 1.0 - 0.35;
 /// Another car this close (UU, centre to centre) can be touching.
 const CAR_PROXIMITY: f32 = 240.0;
 
+fn rot_of(phys: &super::recording::cpp_records::PhysRecord) -> glam::Mat3A {
+    glam::Mat3A::from_cols(
+        phys.rot.rows[0].into(),
+        phys.rot.rows[1].into(),
+        phys.rot.rows[2].into(),
+    )
+}
+
 fn wheels_in_contact(car: &CarRecord) -> usize {
     car.wheels.iter().filter(|w| w.has_contact).count()
 }
@@ -173,8 +181,39 @@ pub fn analyze(recording: &Recording) {
             let av = from.phys.ang_vel;
             let tumble = (av.x * av.x + av.y * av.y).sqrt();
 
+            // `|ang_vel.xy|` is a world-frame magnitude, so it cannot tell a
+            // flip's tumble from an air roll -- and players hold air roll
+            // constantly, since the powerslide button *is* air roll. The flip's
+            // own axis is recorded: `flip_rel_torque` is set once at flip start
+            // and `update_air_torque` applies
+            // `rot * (frt.x * TORQUE_X, frt.y * TORQUE_Y, 0)`, so a live flip's
+            // angular velocity should lie along that axis in the car frame.
+            let rot = rot_of(&from.phys);
+            let av_w = Vec3A::new(av.x, av.y, av.z);
+            // Car-frame angular velocity: rows are the car's axes in world.
+            let av_l = Vec3A::new(
+                av_w.dot(rot.x_axis),
+                av_w.dot(rot.y_axis),
+                av_w.dot(rot.z_axis),
+            );
+            let frt = Vec3A::new(from.flip_rel_torque.x, from.flip_rel_torque.y, 0.0);
+            let axis_l = Vec3A::new(
+                frt.x * rocketsim::consts::car::flip::TORQUE_X,
+                frt.y * rocketsim::consts::car::flip::TORQUE_Y,
+                0.0,
+            )
+            .normalize_or_zero();
+            // Signed component of the car-frame spin along the flip's own axis,
+            // and how much of the total spin that accounts for.
+            let along = av_l.dot(axis_l);
+            let align = if av_l.length() > 1e-3 {
+                along / av_l.length()
+            } else {
+                0.0
+            };
+
             println!(
-                "[{}] FLIPZ {} {} ft={:.4} vzF={:.2} vzT={:.2} fwdz={:.3} upz={:.3} tumble={:.3} boost={} frt={:.3} hasflip={} isflip={} rN={:.3} rD={:.3} rBD={:.3} simvz={:.2} simres={:.3}",
+                "[{}] FLIPZ {} {} ft={:.4} vzF={:.2} vzT={:.2} fwdz={:.3} upz={:.3} tumble={:.3} avl={:.3} along={:.3} align={:.3} frtx={:.3} frty={:.3} boost={} frt={:.3} hasflip={} isflip={} rN={:.3} rD={:.3} rBD={:.3} simvz={:.2} simres={:.3}",
                 recording.name,
                 i,
                 j,
@@ -184,6 +223,11 @@ pub fn analyze(recording: &Recording) {
                 fwd_z,
                 up_z,
                 tumble,
+                av_l.length(),
+                along,
+                align,
+                frt.x,
+                frt.y,
                 u8::from(boosting),
                 // A real flip carries a relative torque; a double jump does not.
                 // `double_jumped_or_flipped` cannot tell them apart, and the

@@ -400,11 +400,11 @@ It is the same measurement as the gate, not a parallel one: it reuses
 gate's to four decimals (4.7793 vs 4.7800 over 464 471 steps). If those ever
 diverge, the census filters have drifted from the runner's.
 
-Suite-wide, 2026-08-21, after the flip z-damp fix (suite mean **2.6169 uu/s**
+Suite-wide, 2026-08-21, after the flip z-damp fix (suite mean **2.5953 uu/s**
 over 461 340 steps), excluding the 1.3% of steps the gate skips as unmeasurable
-impulse windows. Masses below are the pre-flip-fix ones; `air_boost` is now 113
-331 at a mean of 2.21 and `air_free` 233 073 at 1.81, so the two airborne rows
-have swapped with `wall_ceiling` at the top:
+impulse windows. Masses below are the pre-flip-fix ones; `air_boost` is now
+115 742 at a mean of 2.26 and `air_free` 223 229 at 1.73, so `wall_ceiling` is now
+the largest bucket:
 
 | bucket | steps | mean | % of mass |
 |---|---|---|---|
@@ -1382,7 +1382,7 @@ Caveats:
   several of them at the origin makes bullet's solver produce NaN).
 - The C++ pass never gates; it is informational only.
 
-### The Flip Z-Damp Was Firing On Almost Everything (-12.7%, RLFLIP)
+### The Flip Z-Damp Was Firing On Almost Everything (-13.4%, RLFLIP)
 
 The largest single win so far. `RLCENSUS=10` bands every bucket by the recorded
 jump/flip state, and one band carried **6.6% of the whole suite's error mass** by
@@ -1464,9 +1464,9 @@ extension out to 0.65 does not correspond to anything RL does. Inside the window
 RL damps only **38%**, while the old gate damped essentially all of it. The
 dominant failure was the sim damping when RL did not: 1 545 steps at mean 110.5.
 
-#### Tumble is the discriminator
+#### Saturation of the angular speed cap is the discriminator
 
-`|ang_vel.xy|` against `car::MAX_ANG_SPEED` = 5.5:
+First cut, on `|ang_vel.xy|` against `car::MAX_ANG_SPEED` = 5.5:
 
 | tumble | n | damp% |
 |---|---|---|
@@ -1475,41 +1475,77 @@ dominant failure was the sim damping when RL did not: 1 545 steps at mean 110.5.
 | 5.0-5.45 | 476 | 89.1% |
 | >= 5.45 | 313 | 97.4% |
 
-A flip still driving the damp is turning at essentially the cap. Cost of the damp
-term over those samples -- damp on every step the old gate allowed: **330 414**;
-never damp at all: 47 429; `tumble >= 5.0`: **24 237**. The `up.z` test earns
-nothing once tumble is gated (24 126 with it, 24 237 without) and is removed.
+`tumble >= 5.0` costs **24 237** against 330 414 for damping on every step the
+old gate allowed and 47 429 for never damping. The `up.z` test earns nothing once
+the spin is gated (24 126 with it) and is removed.
 
-The threshold sits on a plateau rather than an edge, so it is not fitted to the
-third digit: suite mean 2.6185 at 4.8, **2.6169 at 5.0**, 2.6184 at 5.2, then
-2.6525 at 5.4 as real flips start being excluded.
+But `|ang_vel.xy|` is the wrong statistic twice over. It is a *world*-frame
+projection, so it under-reads by exactly the vertical spin component and misses
+any flip carrying yaw; and "spinning hard" is not the physical criterion. A
+flip's dodge torque (`TORQUE_X` 260 / `TORQUE_Y` 224) **saturates** the angular
+speed cap for the whole dodge, while air roll on weaker torque (130/95/400
+against `air_control::DAMPING`) settles below it. Testing the full angular speed
+for saturation:
+
+| `\|ang_vel\|` | n | damp% |
+|---|---|---|
+| >= 5.4999 | 731 | 94.5% |
+| 5.499-5.4999 | 88 | 84.1% |
+| 5.49-5.499 | 80 | 86.2% |
+| 5.45-5.49 | 14 | 28.6% |
+| 5.0-5.45 | 127 | 17.3% |
+| < 5.0 | 1 436 | 4.9% |
+
+Cost falls to **16 590** at `>= MAX_ANG_SPEED - 0.01`, a further -31.6%. It is a
+real minimum, not a run to the cap: 18 407 at 5.44, 17 131 at 5.48, 16 590 at
+5.49, back up to 17 224 at 5.495 and 21 531 at 5.4999 as genuine flips sitting a
+hair under the cap start being excluded. The suite agrees independently, which is
+the check that matters on the epsilon -- means 2.5956 at 0.05, 2.5951 at 0.02,
+2.5953 at 0.01, 2.5983 at 0.005, 2.6119 at 0.001.
+
+Aligning the spin with the recorded `flip_rel_torque` axis was tried too and is
+not worth its complexity: as a refinement on top of the saturation test it makes
+no difference, and on its own it is worse (`|ang_vel . axis| >= 5.2` costs
+26 153). The axis is live and correct -- a clean side dodge reads `align` = 1.000
+-- it just adds nothing the magnitude does not already carry.
 
 #### Result
 
-**Suite mean 2.9981 -> 2.6169, -12.7%**, gate unchanged at 45 passing.
+**Suite mean 2.9981 -> 2.5953, -13.4%** over the two steps (the tumble gate gave
+-12.7% and the saturation refinement a further -0.83%), gate unchanged at 45
+passing.
 
 | bucket | mass before | mass after | change |
 |---|---|---|---|
-| `air_boost` | 264 715 | 113 331 | **-57%** (mean 5.16 -> 2.21) |
-| `air_free` | 249 381 | 233 073 | -6.5% |
-| `car_proximity` | 116 208 | 106 583 | -8.3% |
-| `wall_ceiling` | 216 116 | 217 510 | +0.6% |
+| `air_boost` | 264 715 | 115 742 | **-56%** (mean 5.16 -> 2.26) |
+| `air_free` | 249 381 | 223 229 | -10.5% |
+| `car_proximity` | 116 208 | 104 913 | -9.7% |
+| `wall_ceiling` | 216 116 | 216 243 | +0.06% |
 
 Everything grounded is untouched to the digit, which is the check that this only
-moved airborne physics. `wall_ceiling` giving back 0.6% is the one regression and
-is small enough to leave.
+moved airborne physics.
+
+Note the closed channel over-predicted the second step badly -- it measured
+-31.6% on the damp term but the suite moved -0.83%. That is not a contradiction:
+the channel measures `vz` alone on the isolated airborne population, while the
+census measures full 3-D `|dv|` over every air step, and after the first fix the
+flip residual was already a small share of it. **Size a refinement on the suite,
+not on the channel that found it.**
 
 #### Still open
 
-Inside the window, `tumble` between 2 and 5 is a 14% coin flip and still carries
-the residue. The likely cause is that `|ang_vel.xy|` is a *world*-frame magnitude
-and so conflates flip tumble with air roll, which players hold constantly (the
-powerslide button *is* air roll -- which is also why `RLCENSUS=3` shows the
-airborne error concentrated on the `hb-ramp` band, where a handbrake means
-nothing physically). Comparing angular velocity against the recorded
-`flip_rel_torque` axis in the car frame should separate a real dodge from a roll;
-`flip_rel_torque` is live in the recording, normalised to 1, while `has_flip` and
-the `is_flipping` pulse are both dead on every one of these steps.
+The saturation test is 86-95% right above the threshold and 5% below it, so what
+remains is the genuinely ambiguous middle: a flip whose spin has already been
+pulled off the cap by air control, and a double jump that is not a flip at all.
+`has_flip` and the `is_flipping` pulse are dead on every one of these steps, so
+the recording carries no direct signal; `flip_rel_torque` is live but adds nothing
+beyond the magnitude. Absent a new field this looks close to the floor.
+
+Worth remembering that `RLCENSUS=3` shows the airborne error concentrated on the
+`hb-ramp` band, where a handbrake means nothing physically. That is not a
+handbrake defect -- the powerslide button *is* the air-roll button, so mid-ramp
+airborne is simply a proxy for "the player is air-rolling", which is what made the
+old gate misfire.
 
 ### Why The 2 s Rollout Collapses, And Where The Signal Is
 

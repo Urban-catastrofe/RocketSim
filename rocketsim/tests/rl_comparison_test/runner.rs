@@ -307,31 +307,61 @@ pub fn set_state_to_record_tick(
                 // more than 20 uu/s so the classification is meaningful, RL
                 // damps 38% of 2476 samples -- while the previous gate admitted
                 // essentially all of them. Splitting by tumble is what separates
-                // them: `|ang_vel.xy| >= 5.0` is damped 92.4% of the time and
-                // below it 14%, against `car::MAX_ANG_SPEED` = 5.5.
+                // them, and the right statistic is *saturation of the angular
+                // speed cap*. A flip's dodge torque (`TORQUE_X` 260 /
+                // `TORQUE_Y` 224) pins angular speed at `car::MAX_ANG_SPEED` =
+                // 5.5 for the whole dodge; air roll, on weaker torque (130/95/
+                // 400) against `air_control::DAMPING`, settles below it. So the
+                // test is "is the car spinning at the cap", not "is it spinning
+                // hard":
+                //
+                // ```text
+                // |ang_vel| >= 5.4999  ->  94.5% damped (n=731)
+                //             5.499    ->  84.1%    (n=88)
+                //             5.49     ->  86.2%    (n=80)
+                //             5.45     ->  28.6%    (n=14)
+                //             5.0      ->  17.3%   (n=127)
+                //             below    ->   4.9% (n=1436)
+                // ```
                 //
                 // Cost of the damp term over those samples: 330 414 uu/s if we
                 // damp whenever the old gate allowed it, 47 429 if we never damp
-                // at all, and 24 237 with this rule.
+                // at all, 24 237 gating on `|ang_vel.xy| >= 5.0`, and **16 590**
+                // with this saturation test.
                 //
-                // The threshold sits on a plateau, so it is not fitted to the
-                // third digit -- suite means 2.6185 at 4.8, 2.6169 at 5.0,
-                // 2.6184 at 5.2, then 2.6525 at 5.4 as real flips start being
-                // excluded.
+                // Use the *full* angular speed, not the world-frame `xy`
+                // magnitude the old gate used: they differ by exactly the
+                // vertical spin component, so `|ang_vel.xy|` under-reads any
+                // flip that carries yaw and misses it. Swapping to the full
+                // magnitude is most of the gain here.
+                //
+                // The cost has a real minimum rather than running to the cap --
+                // 18 407 at 5.44, 17 131 at 5.48, 16 590 at 5.49, then back up
+                // to 17 224 at 5.495 and 21 531 at 5.4999 as genuine flips
+                // sitting a hair under the cap start being excluded.
+                //
+                // The suite agrees independently, which is the real check on the
+                // epsilon: means 2.5956 at 0.05, 2.5951 at 0.02, 2.5953 at 0.01,
+                // then 2.5983 at 0.005 and 2.6119 at 0.001.
                 //
                 // The old `0.0 < up.z < 0.9` condition is gone because it earns
-                // nothing once tumble is gated (24 126 vs 24 237) and it was not
-                // what the game keys off. Do not reinstate it without measuring.
+                // nothing once the spin is gated and it was not what the game
+                // keys off. Do not reinstate it without measuring. Aligning the
+                // spin with the recorded `flip_rel_torque` axis was also tried
+                // and is not worth its complexity: as a refinement on top of
+                // this it makes no difference, and on its own it is worse
+                // (`|ang_vel . axis| >= 5.2` costs 26 153).
                 //
                 // Nor should the window be widened. It is tempting, since the
                 // sim's own rule also damps a falling flipper out to
                 // `TORQUE_TIME`, but RL does not: past `Z_DAMP_END` it damps 17
                 // of 846 sharp falling samples. Widening it measured +3.56% on
                 // the suite.
-                const FLIP_DAMP_TUMBLE: f32 = 5.0;
+                const FLIP_DAMP_ANG_SPEED: f32 = rocketsim::consts::car::MAX_ANG_SPEED - 0.01;
+                let ang_speed = (av.x * av.x + av.y * av.y + av.z * av.z).sqrt();
                 let zd = rocketsim::consts::car::flip::Z_DAMP_START
                     ..=rocketsim::consts::car::flip::Z_DAMP_END;
-                if zd.contains(&cs.flip_time) && tumble >= FLIP_DAMP_TUMBLE {
+                if zd.contains(&cs.flip_time) && ang_speed >= FLIP_DAMP_ANG_SPEED {
                     cs.is_flipping = true;
                 }
             }
