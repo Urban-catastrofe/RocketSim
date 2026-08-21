@@ -12,6 +12,7 @@
 use crate::rl_comparison_test::recording::Recording;
 use std::sync::OnceLock;
 
+mod ballcensus;
 mod car_order;
 mod carcontact;
 mod census;
@@ -61,7 +62,15 @@ fn test_recording(recording: &Recording) {
     // RLCENSUS=1..9: error-mass census by cause (see census.rs).
     if matches!(
         std::env::var("RLCENSUS").as_deref(),
-        Ok("1") | Ok("2") | Ok("3") | Ok("4") | Ok("5") | Ok("6") | Ok("7") | Ok("8") | Ok("9")
+        Ok("1")
+            | Ok("2")
+            | Ok("3")
+            | Ok("4")
+            | Ok("5")
+            | Ok("6")
+            | Ok("7")
+            | Ok("8")
+            | Ok("9")
             | Ok("10")
             | Ok("true")
     ) {
@@ -87,6 +96,25 @@ fn test_recording(recording: &Recording) {
     if std::env::var("RLFLIP").is_ok() {
         flipdamp::analyze(recording);
         return;
+    }
+
+    // RLBALL=1: error-mass census for the ball, by contact cause.
+    // RLBALL=2: liveness survey of the ball's world-contact fields.
+    // RLBALL=3: per-step dump. See ballcensus.rs.
+    match std::env::var("RLBALL").as_deref() {
+        Ok("2") => {
+            ballcensus::survey(recording);
+            return;
+        }
+        Ok("4") => {
+            ballcensus::bounce_study(recording);
+            return;
+        }
+        Ok(_) => {
+            ballcensus::analyze(recording);
+            return;
+        }
+        Err(_) => {}
     }
 
     // RLCARC=1: dump the measured car-car contact impulse on overlapping steps.
