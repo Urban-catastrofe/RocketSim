@@ -1340,6 +1340,7 @@ order/quantization, often acceptable.
 | `RLCENSUS` | `1` error-mass census by cause; `2` also lists each bucket's worst steps; `3` sub-bands by speed + handbrake state; `4` by `friction_curve_input`; `5` by suspension compression; `6` by compression x compression rate; `7` 1-UU compression bands with a quiet suspension | off |
 | `RLCTRLOFF` | shift which tick the census reads controls from (`-1`/`0`/`+1`), to re-verify control alignment | `0` |
 | `RLLATDUMP` | `1` to emit one `LATROW` per flat-floor zero-steer step: RL's own lateral friction impulse and the sim's, with per-wheel slip ratio and side impulse. See `latdump.rs` | off |
+| `RLBALL` | `1` census of ball velocity error by contact cause; `2` liveness survey of the ball's world-contact fields plus a position-vs-velocity audit of the recording itself; `3` per-step `BALLDUMP`; `4` `BALLBOUNCE`, judging a bounce by its outcome across a free rollout with tick alignment. See `ballcensus.rs` | off |
 | `RLFLIP` | `1` to emit one `FLIPZ` row per isolated airborne flip step: RL's own z-damp decision on the closed vertical axis, with `flip_time`, tumble, `up.z` and both boost orderings. Filter to `0.35*|vzF| > 20` before reading. See `flipdamp.rs` | off |
 | `RLCENSUS` (`10`) | band every bucket by the recorded jump/flip state and `flip_time` phase | off |
 | `RLCARC` (`4`) | survey car-identity transpositions after an array collapse (`CARCSWAP`). Zero suite-wide; kept as a ruled-out hypothesis | off |
@@ -1381,6 +1382,146 @@ Caveats:
 - Demoed/parked cars are parked far below the arena in the C++ pass (restoring
   several of them at the origin makes bullet's solver produce NaN).
 - The C++ pass never gates; it is informational only.
+
+### The Ball Was Never Censused, And Is Mostly Right (RLBALL)
+
+The ball is gated on the same per-tick bar as the cars and carries **461 of
+the suite's 1009 gate violations** against 548 for every car combined, but
+`census.rs` only ever files *car* velocity error, so where the ball's error
+lived was simply unknown. `RLBALL` is the ball's census.
+
+Two things make the ball a cleaner subject than the car. **143 recordings have
+no car in them at all**, so the system closes to gravity, drag and the arena
+mesh. And free flight is already exact -- `ball_very_slow` scores 0.009 uu/s,
+`ball_spin` 0.002, `ball_near_*` 0.001 -- so drag and gravity are right and
+anything left is a contact.
+
+#### Both other members of the contact triple are dead, again
+
+`RLBALL=2` surveys the ball's own `has_world_contact` / `world_contact_point` /
+`world_contact_normal`, which nobody had checked: the `RLTOUCH=2` survey behind
+[[world-contact-fields-are-dead]] walked `car_records` only.
+
+| measurement | result |
+|---|---|
+| ball ticks | 133 280 |
+| `has_world_contact` true | 13 904 (10.4%) |
+| of the 2 801 kinematic bounces, flagged | 827 (**29.5%**) |
+| `world_contact_normal` nonzero | 13 904 |
+| ...of those, exactly `+z` | **13 904 (all of them)** |
+| `world_contact_point` nonzero | 126 807 (95%) |
+
+So the normal is dead in the same way it is on cars. The *point* is nonzero,
+which is new -- but it is always the ball's own position with `z` zeroed, on a
+floor contact and 250 UU up a corner alike. **Infer nothing from any of the
+three, on the ball either.**
+
+#### But the ball's frames are clean, unlike the cars'
+
+`runner::frame_advance_broken` walks `car_records` and nothing else, so the
+ball's `physics_frame` is validated nowhere in the harness. It turns out not to
+matter: bucketing on it fires on **zero** steps suite-wide. The ball's ground
+truth advances exactly `stride` every time, so the defect that owned three
+quarters of `car_proximity` ([[match-replays-duplicate-cars]]) has no analogue
+here.
+
+#### 97% of ball steps are already exact
+
+| | steps | share |
+|---|---|---|
+| all measured ball steps | 155 739 | |
+| error > 1 uu/s | 4 906 | 3.15% |
+| error > 10 uu/s | 3 840 | **2.47%** |
+| error > 100 uu/s | 2 532 | 1.63% |
+
+Every ball bucket is bimodal, so read the counts and never the means: the
+`free` bucket has p50 **0.006** and a max of **5 269**. A mean of 7.7 uu/s
+there describes nothing that happens.
+
+#### Measure a bounce by its outcome, not by one tick of it
+
+This is the important methodological point, and it is the same trap as
+[[car-car-bump-is-a-subframe-event]]. `ball_corner_fast_from_center` crosses the
+corner at 4 340 uu/s, i.e. **36 UU per tick**. Rocket League splits the bounce
+across two ticks; the sim, restored to RL's state every tick, reports `np=0` --
+no contact at all -- on both, because RL's own resolution keeps the ball ~13 UU
+short of the sim's contact threshold at every tick boundary. The per-tick bar
+charges that phase difference the **entire** impulse, twice.
+
+`RLBALL=4` instead free-runs the sim across the whole bounce and compares the
+outgoing velocity, allowing a shift of up to 3 ticks:
+
+| population | n | err, no shift | aligned | mean impulse | accurate <50 |
+|---|---|---|---|---|---|
+| world bounces, scripted | 696 | 66 | 61 | 1 122 | **83%** |
+| ...no-car `ball_*` only | 599 | 67 | 61 | 1 042 | **83%** |
+| car-ball hits, scripted | 154 | 102 | 93 | 971 | 63% |
+| ...`car_ball_*` only | 102 | 77 | 64 | 1 063 | 65% |
+| world bounces, match replays | 1 044 | 1 291 | 1 239 | 1 556 | 31% |
+| car-ball hits, match replays | 427 | 437 | 383 | 1 532 | 23% |
+
+**The ball's core bounce physics is right.** Restitution 0.6, friction 0.35,
+drag, spin and the 6.0 rad/s angular cap all check out: by scenario family the
+flat-geometry cases are perfect -- `ceiling` 0% bad at a mean outcome error of
+**0.9 uu/s against a 2 377 uu/s impulse**, `fast` 0% at 1.9 vs 2 661, `bounce`
+0% at 2.2 vs 2 254, `max` 0% at 0.7, `roll` 0% at 7.3, `wall` 7% at 14.3.
+
+#### What is left is the goal frame
+
+| subject | n | bad >=50 | %bad | mean aligned err | mean sim contacts |
+|---|---|---|---|---|---|
+| `goal` | 138 | 48 | **35%** | **172.3** | 21.5 |
+| `crossbar` | 4 | 2 | 50% | 312.7 | 2.0 |
+| `post` | 5 | 2 | 40% | 52.8 | 2.6 |
+| `corner` | 158 | 20 | 13% | 28.0 | 6.3 |
+| `wall` | 67 | 5 | 7% | 14.3 | 3.8 |
+| `chaos` | 53 | 2 | 4% | 4.3 | 1.6 |
+
+Of the 104 genuinely-wrong bounces in the no-car recordings, **36 sit inside
+the goal mouth and carry 60% of the total residual error**. The mechanism is
+visible in one dump. `ball_goal_crossbar_drop_from_above` enters the goal at
+`v = (0, 1487, -979)` and grazes the crossbar's rounded underside; RL removes
+**241** uu/s of `+y`, then 301 on the next tick, then stops. The sim answers
+with a near-pure `-y` wall normal `(0, -0.999, -0.044)` and reverses the ball
+outright, `+1487 -> -360` -- roughly 19% of a bounce, delivered as 100% of one.
+The sim's contact count explodes there too: up to **304 `BallHitWorld` events in
+a 10-tick window** at `ball_goal_post_base_left`.
+
+Note the contact normals in `BALLDUMP` are the *pre*-adjustment values.
+`ArenaContactTracker::callback` deliberately pushes its record **before**
+`adjust_internal_edge_contacts` mutates the manifold point, so what the dump
+prints is the raw narrowphase normal and not necessarily what the solver used.
+Do not conclude the internal-edge machinery is missing from a tilted normal in
+a dump -- it is present and is a faithful port of
+`btAdjustInternalEdgeContacts`.
+
+#### Match replay ball records cannot grade anything
+
+`RLBALL=2` also audits the recording against *itself*, with no simulation
+involved. Bullet integrates `pos += vel * dt` with the post-step velocity, so
+across a recorded step `(pos_to - pos_from) * 120` must equal `vel_to`:
+
+| family | recs | ticks | bounces | inconsistent | worst | mean err |
+|---|---|---|---|---|---|---|
+| match replays | 10 | 98 819 | 2 013 | 2 036 (2.06%) | **631 156** | 169.578 |
+| `ball_*` scripted | 143 | 42 297 | 879 | 416 (0.98%) | 2 313 | 2.199 |
+| `car_ball_*` scripted | 84 | 15 636 | 356 | 269 (1.72%) | 1 912 | 2.940 |
+| `mech_*` scripted | 17 | 4 633 | 94 | 66 (1.42%) | 1 207 | 2.582 |
+
+**Read the magnitude, not the rate.** All four families disagree on roughly one
+step per bounce, which is expected and is itself a finding: RL applies the
+contact impulse *after* integrating the transform, so on a contact tick the
+identity legitimately fails by about one impulse. The scripted worst cases
+(2 313, 1 912, 1 207) are exactly that size. The match replays' **631 156 uu/s**
+is not -- the ball's own speed cap is 6 000. At `2v2` t4178-t4182 the recorded
+velocity flips sign three times in five ticks (`+2825 -> -2432 -> +955 ->
+-2442`) while the recorded position moves smoothly and no car is within 900 UU
+and no surface within 21 UU.
+
+So **score the ball on the 244 scripted recordings and not on the match
+replays**, which hold 78% of its raw error mass and cannot support any of it.
+This is not the same defect as [[match-replays-duplicate-cars]] -- that one is
+the *car* array collapsing; this is the ball's own velocity channel.
 
 ### The Flip Z-Damp Was Firing On Almost Everything (-13.4%, RLFLIP)
 
