@@ -324,18 +324,31 @@ fn bucket_of(
 
     let (nw_from, nw_to) = (wheels_in_contact(from), wheels_in_contact(to));
 
-    // `has_world_contact` is set for *any* contact with world geometry, wheels
-    // included, so it is true on more than half of all steps and must not be
-    // tested before the wheel count. It only names a distinct cause when the
-    // chassis is scraping with no wheel down (rolled onto a side or the roof).
-    if nw_from == 0 && (from.phys.has_world_contact || to.phys.has_world_contact) {
-        return "body_scrape";
-    }
+    // There is no `body_scrape` bucket. There used to be, defined as
+    // `nw_from == 0 && (from.has_world_contact || to.has_world_contact)` and
+    // meant to catch a chassis dragging with no wheel down. `RLTOUCH=2` shows
+    // the field cannot express that: `has_world_contact` is true on *zero* of
+    // 183,257 car-ticks with no wheel in contact, so the condition could only
+    // ever fire through its `to` term, and the flag itself lags contact by a
+    // tick - true on 93.7% of steady wheel-contact ticks but only 2.9% of
+    // touchdown ticks. The bucket was therefore a 3% sample of landings,
+    // selected by the lag, wearing the name of a mechanism this dataset never
+    // records. `world_contact_point` and `world_contact_normal` are dead too:
+    // across 238,076 logged contacts they are the origin and exactly `+z` every
+    // single time. See `touchdown.rs`.
     if nw_from > 0 && min_contact_z(from) < FLOOR_NORMAL_Z {
         return "wall_ceiling";
     }
+    // Gaining and losing contact are different mechanisms and want separate
+    // rows. On a landing the sim's wheel ray, cast from the start-of-tick pose,
+    // finds nothing on 90% of the steps where RL has already produced an
+    // impulse, so `touchdown` is where that phase error lands.
     if nw_from != nw_to {
-        return "wheel_transition";
+        return match (nw_from, nw_to) {
+            (0, _) => "touchdown",
+            (_, 0) => "liftoff",
+            _ => "wheel_transition",
+        };
     }
     match nw_from {
         0 => {

@@ -34,6 +34,7 @@ mod state;
 mod stats;
 mod suspdump;
 mod tolerance;
+mod touchdown;
 mod validate;
 
 use config::{DeepDiveMode, GateMode, HarnessConfig};
@@ -76,6 +77,20 @@ fn test_recording(recording: &Recording) {
     if std::env::var("RLLATDUMP").is_ok() {
         latdump::analyze(recording);
         return;
+    }
+
+    // RLTOUCH=1: dump the measured contact impulse on landing-touchdown steps.
+    // RLTOUCH=2: survey the `has_world_contact` field. See touchdown.rs.
+    match std::env::var("RLTOUCH").as_deref() {
+        Ok("2") => {
+            touchdown::survey(recording);
+            return;
+        }
+        Ok(_) => {
+            touchdown::analyze(recording);
+            return;
+        }
+        Err(_) => {}
     }
 
     // RLRESID=1|2: residual-force decomposition (see residual.rs).
@@ -196,9 +211,7 @@ fn test_recording(recording: &Recording) {
             for line in rollout::rollout_lines(&cpp_rollout, &cfg) {
                 println!("{line}");
             }
-            for line in
-                cpp_runner::rollout_comparison_lines(&rollout_report, &cpp_rollout, &cfg)
-            {
+            for line in cpp_runner::rollout_comparison_lines(&rollout_report, &cpp_rollout, &cfg) {
                 println!("{line}");
             }
         }

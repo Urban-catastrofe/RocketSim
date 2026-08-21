@@ -417,6 +417,12 @@ excluding the 1.3% of steps the gate skips as unmeasurable impulse windows:
 | `wheel_transition` | 1.1% | 12.93 | 3.7% |
 | `drive_coast` | 4.2% | 1.91 | 2.1% |
 
+There was a twelfth bucket, `body_scrape`, at 34 steps and 0.04% of mass. It has
+been deleted: the field it was built on cannot express what it claimed to
+measure, and its steps belong to `wheel_transition`. See
+*Chassis Scraping Does Not Exist* below, which also splits `wheel_transition`
+into `touchdown` / `liftoff` / `wheel_transition`.
+
 The bucket *membership* changed with that fix as well as the means: a step counts
 as `drive_handbrake` when `handbrake_val > 0`, and rebuilding the ramp moved
 18 685 mid-ramp steps out of `drive_throttle`, which is most of why that bucket
@@ -929,6 +935,100 @@ the per-tick calibration sweep needs. The sweep itself scales `lat_friction` by
 k = 1 and k = 2 behind a temporary probe in `Car::pre_tick_update`; it is not
 committed.
 
+### Chassis Scraping Does Not Exist (RLTOUCH)
+
+The census had a `body_scrape` bucket, meant for a car dragging its chassis with
+no wheel down - rolled onto a side or the roof. It scored a mean of 21 uu/s over
+34 steps with a near-deterministic downward bias, which read like the cleanest
+single-mechanism defect anywhere in the dataset. It was an artefact of the field
+it was defined on.
+
+`RLTOUCH=2` surveys that field, `PhysRecord::has_world_contact`, over the whole
+suite. Three results, all unambiguous:
+
+| measurement | result |
+|---|---|
+| car-ticks with **no** wheel in contact where `has_world_contact` is true | **0** of 183 257 |
+| steady wheel-contact ticks where it is true | 238 076 of 254 180 (93.7%) |
+| **touchdown** ticks (0 wheels -> 1+) where it is true | 37 of 1292 (**2.9%**) |
+| logged `world_contact_point` away from the origin | **0** of 238 076 |
+| logged `world_contact_normal` not exactly `+z` | **0** of 238 076 |
+
+So the flag never reports a chassis-only contact - it tracks *wheel* contact, and
+it lags it by a tick. The bucket condition was
+`nw_from == 0 && (from.has_world_contact || to.has_world_contact)`, and since the
+`from` term is dead the bucket could only fire through `to`. Its 34 steps were
+therefore the 3% of landing touchdowns where the lagging flag happened to be on
+time - a biased sample of a completely different mechanism, wearing the name of
+one this dataset never records. **Two more observer fields are dead as well:**
+`world_contact_point` is the origin and `world_contact_normal` is exactly `+z` on
+every one of 238 076 logged contacts, including the suite's thousands of wall and
+ceiling steps. Infer nothing from either.
+
+The bucket is gone. `wheel_transition` now splits three ways instead, on what
+actually changed, and the split is worth having:
+
+| bucket | steps | mean | note |
+|---|---|---|---|
+| `touchdown` (0 -> 1+) | 1204 | **16.93** | gaining contact |
+| `wheel_transition` (n -> m, both > 0) | 2891 | 14.05 | count shifting while in contact |
+| `liftoff` (1+ -> 0) | 1029 | **2.91** | losing contact |
+
+Total mass is unchanged (suite mean 3.7512 before and after - the steps only
+changed label). **Acquiring contact is 5.8x worse than releasing it.** Losing
+contact is nearly free, at the level of ordinary partial-contact driving.
+
+#### What Actually Goes Wrong On A Landing
+
+`RLTOUCH=1` measures the touchdown tick on the closed vertical axis. At the start
+of such a step no wheel is in contact, so there is no suspension force, no sticky
+force and no wheel friction, and the car body has zero linear damping - RL's own
+contact impulse is `(vel[i+1].z - vel[i].z) + g*dt - boost_z`, straight from the
+recording. Each row also carries the pose-derived wheel ray length at **both**
+ends of the step and how many wheels each pose puts within `MAX_SUSPENSION_TRAVEL`.
+
+On 476 flat-floor near-upright touchdown steps:
+
+- **The sim's contact decision is exactly its own raycast, as designed.** The
+  wheel count the sim ended the step with equals the count the *start*-of-step
+  pose predicts on **473 of 473** rows. The instrument reproduces the sim
+  bit-for-bit, so any disagreement below is RL's, not measurement error.
+- **RL's is not.** On the 291 steps where the start-of-step pose puts no wheel
+  within 12 uu, RL has already applied a non-gravity vertical impulse on **90%**
+  of them (mean +6.0 uu/s) while the sim found no contact at all on **0 of 291**.
+  That population carries **66% of the touchdown tick's error mass**.
+- The mirror case is real but small: 13 steps where the sim engages and RL does
+  not, and there the sim's dv is `-2.707` - exactly the sticky force
+  (`0.5 * g * dt`). Gentle settling makes the sim stick a tick early. 1.4% of mass.
+
+So RL responds to geometry the start-of-tick pose has not reached. The obvious
+fix - evaluate the suspension one tick later in phase, at the end-of-step pose -
+**is wrong, and the measurement says so before any of it gets written.**
+Transcribing the sim's own suspension model (`update_suspension` term for term,
+plus the sticky force) and evaluating it at each pose:
+
+| phase | sum \|model - RL\| over the 476 steps |
+|---|---|
+| start-of-step pose (what the sim does) | 3027 |
+| the sim as it actually stands | 2980 |
+| end-of-step pose (one tick early) | **7454** |
+
+The end-pose model overshoots by 2.5x on exactly the rows that motivate it - RL
++61.9 where it predicts +132.8, RL +44.5 where it predicts +101.3. RL's arrival
+impulse is a *fraction* of a full tick of suspension force, which is what a
+contact beginning part-way through the tick looks like, not a whole-tick force
+moved sideways in time. (The model transcription itself is sound: evaluated at
+the start pose it reproduces the sim's measured `dv_z` with p50 -0.004 and mean
+\|residual\| 0.409 uu/s.)
+
+**The open item** is therefore sub-tick contact onset: when the ray misses at the
+start of the tick but the wheel will reach the ground within it, apply the
+suspension force scaled by the fraction of the tick actually spent in contact.
+That is a local change to `prepare_for_raycast` / `apply_ray_cast`, and the
+`touchdown` bucket plus `RLTOUCH=1` now score it directly. Sizing first: the
+whole bucket is 1.2% of suite mass, and `wheel_transition` another 2.3%, so this
+is worth about 1% of the suite mean at best - do the cheap version.
+
 ## The Accuracy Bar
 
 A case **passes** when no single simulated step diverges from the recording by
@@ -1042,6 +1142,7 @@ order/quantization, often acceptable.
 | `RLCENSUS` | `1` error-mass census by cause; `2` also lists each bucket's worst steps; `3` sub-bands by speed + handbrake state; `4` by `friction_curve_input`; `5` by suspension compression; `6` by compression x compression rate; `7` 1-UU compression bands with a quiet suspension | off |
 | `RLCTRLOFF` | shift which tick the census reads controls from (`-1`/`0`/`+1`), to re-verify control alignment | `0` |
 | `RLLATDUMP` | `1` to emit one `LATROW` per flat-floor zero-steer step: RL's own lateral friction impulse and the sim's, with per-wheel slip ratio and side impulse. See `latdump.rs` | off |
+| `RLTOUCH` | `1` to emit one `TOUCHROW` + `TOUCHSUSP` per landing-touchdown step: RL's own contact impulse and the sim's, with the wheel ray geometry at both ends of the step; `2` to survey the `has_world_contact` field instead. See `touchdown.rs` | off |
 | `RLSUSPDUMP` | `1` to emit one `SUSPROW` per flat-floor step: RL's own suspension impulse and the sim's, with per-wheel compression and rate. See `suspdump.rs` | off |
 | `RLTHREADS` | worker threads for the per-tick pass | all cores (≤16) |
 | `RLCONT` | `1` to also run the sequential continuous (compounding) pass | off |
