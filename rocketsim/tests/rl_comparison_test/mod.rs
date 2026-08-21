@@ -93,6 +93,10 @@ fn test_recording(recording: &Recording) {
             carcontact::raw_dump(recording);
             return;
         }
+        Ok("4") => {
+            carcontact::swap_survey(recording);
+            return;
+        }
         Ok(_) => {
             carcontact::analyze(recording);
             return;

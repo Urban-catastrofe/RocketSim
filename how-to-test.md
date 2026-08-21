@@ -1338,6 +1338,7 @@ order/quantization, often acceptable.
 | `RLCENSUS` | `1` error-mass census by cause; `2` also lists each bucket's worst steps; `3` sub-bands by speed + handbrake state; `4` by `friction_curve_input`; `5` by suspension compression; `6` by compression x compression rate; `7` 1-UU compression bands with a quiet suspension | off |
 | `RLCTRLOFF` | shift which tick the census reads controls from (`-1`/`0`/`+1`), to re-verify control alignment | `0` |
 | `RLLATDUMP` | `1` to emit one `LATROW` per flat-floor zero-steer step: RL's own lateral friction impulse and the sim's, with per-wheel slip ratio and side impulse. See `latdump.rs` | off |
+| `RLCARC` (`4`) | survey car-identity transpositions after an array collapse (`CARCSWAP`). Zero suite-wide; kept as a ruled-out hypothesis | off |
 | `RLKEEPDUP` | `1` to keep the duplicated-car and broken-frame-advance steps *in* the measurement instead of voiding them. They are 0.7% of steps and 21% of error mass, so this inflates every mean by ~25%; for re-measuring the artifact only | off |
 | `RLCARC` | `1` to emit one `CARC` row per overlapping car pair: RL's own contact impulse on the closed relative-velocity axis and the sim's; `2` to survey intra-tick `physics_frame` agreement (`CARCSYNC`/`CARCADV`); `3` with `RLCARC_REC=<name> RLCARC_T=<lo>:<hi>` for a raw per-car dump. See `carcontact.rs` | off |
 | `RLTOUCH` | `1` to emit one `TOUCHROW` + `TOUCHSUSP` per landing-touchdown step: RL's own contact impulse and the sim's, with the wheel ray geometry at both ends of the step; `2` to survey the `has_world_contact` field instead. See `touchdown.rs` | off |
@@ -1376,6 +1377,91 @@ Caveats:
 - Demoed/parked cars are parked far below the arena in the C++ pass (restoring
   several of them at the origin makes bullet's solver produce NaN).
 - The C++ pass never gates; it is informational only.
+
+### Why The 2 s Rollout Collapses, And Where The Signal Is
+
+The duplicated-car fix gives a clean controlled experiment on this, because
+`RLKEEPDUP=1` reproduces the pre-fix behaviour exactly. Same command
+(`RLROLL=2s RLROLL_STRIDE=10`), same starts, one variable. Car velocity error,
+n-weighted across ~47 000 rollouts:
+
+| horizon | with corrupt steps | voided | change |
+|---|---|---|---|
+| t1 | 7.10 | 6.36 | **-10.4%** |
+| t30 (0.25 s) | 44.08 | 41.44 | -6.0% |
+| t60 (0.5 s) | 81.96 | 79.18 | -3.4% |
+| t120 (1.0 s) | 184.70 | 182.93 | -1.0% |
+| t180 (1.5 s) | 301.34 | 301.36 | **+0.0%** |
+| t240 (2.0 s) | 414.50 | 414.49 | **-0.0%** |
+
+Car position is the same story more sharply: t1 0.25 -> 0.07 (-72%), t30 8.41 ->
+5.71 (-32%), t60 21.47 -> 17.98 (-16%), t120 -3.4%, then t180 and t240 identical
+to five significant figures.
+
+**A 20% improvement in per-tick accuracy buys exactly nothing at 2 s.** That is
+the answer to why the long window collapses: by 1.5 s the trajectory retains no
+information about how accurate the steps were. The error has reached the scale of
+the quantity itself -- 414 uu/s against car speeds around 1400 -- so it is
+saturation, and no per-tick fix can move it. Do not score a physics change on a
+1 s or 2 s rollout mean; it is measuring the Lyapunov exponent, not the physics.
+
+**The usable horizon is t1 to t60.** The fix's benefit decays smoothly from -72%
+at t1 to -3% at t120 and zero beyond, so 0.25-0.5 s is where a per-tick change is
+still visible with the horizon's extra sensitivity to *timing* rather than just
+magnitude.
+
+#### What actually drives the compounding
+
+Splitting car velocity error by recording family, at t60 where sample retention
+is still 67% or better:
+
+| family | t1 | t30 | t60 | t240 |
+|---|---|---|---|---|
+| `car_*` (single car, scripted) | 2.6 | 13.6 | **19.0** | 22.7 |
+| `mech_*` (single car + ball) | 2.4 | 19.3 | **38.0** | 403.6 |
+| `car_car_*` (two cars, scripted) | 7.3 | 41.0 | **83.9** | 427.6 |
+| `2v2*` / `3v3` (match) | 6.8 | 44.4 | **84.2** | 417.5 |
+
+**At half a second: one car alone is 19 uu/s, add a ball and it is 38, add a
+second car and it is 84.** So the compounding is driven by contact events, not by
+a systematic force error in free motion -- which agrees with free flight being
+essentially exact per-tick. Note `car_*` here *excludes* `car_car_*`; an earlier
+measurement globbed them together, which is why it read the single-car family as
+converging with the rest.
+
+Do not read the `car_*` row past t60. Its n falls from 4322 to 816 at t180 and
+300 at t240 because single-car recordings are short, and the error *decreases*
+from 49.9 to 22.7 across that -- pure survivorship, only the calmest recordings
+are long enough to reach 2 s. The other three families keep 33 000+, 1 440 and
+228 samples respectively.
+
+#### `car_car_*` at t30-t60 is the instrument for car-car work
+
+It is the one place with all four properties at once: provably clean ground truth
+(every scripted recording is at exactly 0.0000 frame desync), a healthy sample
+(n = 2 130 at t30, 2 028 at t60), a horizon where per-tick accuracy still shows,
+and sensitivity to contact *timing* that the per-tick census bucket does not have.
+The per-tick `car_proximity` bucket is only 8.4% of mass at a mean of 7.40; this
+sees the same physics at 41-84 uu/s.
+
+#### Ruled out: identity relabelling after a collapse
+
+Worth recording because it was the obvious suspect and it is wrong. The array
+collapse leaves one canonical slot holding a copy of another car, so that slot's
+track in `car_order::reorder_cars` carries the wrong position; when the real car
+reappears the matcher could plausibly leave the two permanently transposed. A
+rollout would be devastated by that -- it restores once and runs, so after a
+transposition it compares against a different physical car thousands of UU away --
+while per-tick measurement would be blind, since both ends of every later step are
+relabelled consistently and the single transition step is voided by the 100 UU
+displacement test.
+
+`RLCARC=4` counts transpositions across the whole suite: **zero.** Out of 4 843
+ticks where some but not all live cars jump more than 100 UU, 7 are full resets
+and none is a two-car swap. Those 4 843 are the collapse *boundaries* -- a slot
+receiving a copy of a car 3 200 UU away jumps hugely, then jumps back -- and
+`has_discontinuity` was already voiding them on displacement. The fix above caught
+the smooth *interior* of each collapse, which is what displacement could not see.
 
 ## Rollout Mode (RLROLL) — compounding errors
 

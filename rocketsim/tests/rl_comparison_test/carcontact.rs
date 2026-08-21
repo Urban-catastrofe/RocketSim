@@ -391,3 +391,102 @@ pub fn raw_dump(recording: &Recording) {
         }
     }
 }
+
+/// Survey car-identity relabelling (`RLCARC=4`).
+///
+/// The array collapse leaves `car_order::reorder_cars` in a bad spot. During the
+/// collapse one canonical slot receives a copy of another car, so that slot's
+/// track is left holding the *wrong* car's position and velocity. When the real
+/// car reappears the matcher picks by velocity-predicted position, and there is
+/// no guarantee it lands back in its original slot -- a permanent transposition
+/// is entirely possible.
+///
+/// Per-tick measurement is blind to this: both ends of every later step are
+/// relabelled consistently, and the single transition step is voided by the
+/// 100 UU displacement test in `has_discontinuity`. A rollout is not blind to it
+/// at all -- it restores once and runs, so after a transposition it compares the
+/// sim's car `j` against a different physical car, thousands of UU away. That
+/// would look exactly like "compounding error" while being nothing of the kind.
+///
+/// A transposition shows up as two cars swapping places in one tick: both jump
+/// far, and each lands where the other was. This reports jump events and how
+/// many of them are that specific pattern, plus how many follow a collapse.
+pub fn swap_survey(recording: &Recording) {
+    let num_cars = recording.info.num_cars as usize;
+    if num_cars < 2 {
+        return;
+    }
+    /// A car cannot travel this far in one tick (2300 UU/s is 19.2 UU), so a
+    /// larger jump is a relabel, a teleport or a demo respawn.
+    const JUMP: f32 = 100.0;
+
+    let stride = recording.stride;
+    let mut jumps = 0usize;
+    let mut swaps = 0usize;
+    let mut swaps_after_collapse = 0usize;
+    let mut resets = 0usize;
+
+    for t in stride..recording.ticks.len() {
+        let (from, to) = (&recording.ticks[t - stride], &recording.ticks[t]);
+        if from.car_records.len() != num_cars || to.car_records.len() != num_cars {
+            continue;
+        }
+        let moved: Vec<usize> = (0..num_cars)
+            .filter(|&c| {
+                let (a, b) = (&from.car_records[c], &to.car_records[c]);
+                if a.is_demoed || b.is_demoed {
+                    return false;
+                }
+                if is_sentinel(&a.phys)
+                    || is_car_sentinel(&a.phys)
+                    || is_sentinel(&b.phys)
+                    || is_car_sentinel(&b.phys)
+                {
+                    return false;
+                }
+                (Vec3A::from(b.phys.pos) - Vec3A::from(a.phys.pos)).length() > JUMP
+            })
+            .collect();
+        if moved.is_empty() {
+            continue;
+        }
+        jumps += 1;
+        // Every live car moving at once is a kickoff or goal reset, not a relabel.
+        let live = (0..num_cars)
+            .filter(|&c| !to.car_records[c].is_demoed && !is_car_sentinel(&to.car_records[c].phys))
+            .count();
+        if moved.len() == live {
+            resets += 1;
+            continue;
+        }
+        // A transposition: each mover ends up where another mover started.
+        let is_swap = moved.iter().all(|&c| {
+            let here = Vec3A::from(to.car_records[c].phys.pos);
+            moved.iter().any(|&o| {
+                o != c && (Vec3A::from(from.car_records[o].phys.pos) - here).length() < JUMP
+            })
+        }) && moved.len() >= 2;
+        if is_swap {
+            swaps += 1;
+            // Did the tick just before this hold a duplicated car?
+            let prev_collapsed = (1..=3).any(|back| {
+                t.checked_sub(back * stride)
+                    .is_some_and(|u| super::runner::has_duplicate_car(&recording.ticks[u]))
+            });
+            if prev_collapsed {
+                swaps_after_collapse += 1;
+            }
+        }
+    }
+
+    println!(
+        "[{}] CARCSWAP cars={} ticks={} jump_ticks={} resets={} swaps={} swaps_after_collapse={}",
+        recording.name,
+        num_cars,
+        recording.ticks.len(),
+        jumps,
+        resets,
+        swaps,
+        swaps_after_collapse,
+    );
+}
