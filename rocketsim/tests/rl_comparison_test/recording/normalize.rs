@@ -8,8 +8,8 @@
 //! the C++ side-by-side) on one consistent interpretation.
 
 use glam::Vec3A;
-use rocketsim::consts::TICK_TIME;
 use rocketsim::consts::car::{drive, jump};
+use rocketsim::consts::{TICK_RATE, TICK_TIME};
 
 use super::tick_record::TickRecord;
 
@@ -189,7 +189,8 @@ pub fn normalize_jump_active(ticks: &mut [TickRecord], num_cars: usize) -> usize
                 // elapsed. `prev_controls` is the input that was applied over
                 // the step *into* this tick, so it is what kept the jump alive.
                 let held = rec.prev_controls.jump;
-                if rec.jump_time >= jump::MAX_TIME || (rec.jump_time >= jump::MIN_TIME && !held) {
+                let jump_ticks = (rec.jump_time * TICK_RATE).round() as u32;
+                if jump_ticks >= jump::MAX_TICKS || (jump_ticks >= jump::MIN_TICKS && !held) {
                     *is_active = false;
                 }
             }

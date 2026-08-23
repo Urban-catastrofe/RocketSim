@@ -1,5 +1,6 @@
-use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::{self, ErrorKind, Read};
+
+use byteorder::{LittleEndian, ReadBytesExt};
 
 pub struct DataReader<'a> {
     bytes: &'a [u8],
@@ -16,6 +17,11 @@ impl<'a> DataReader<'a> {
 
     pub fn read_u32(&mut self) -> io::Result<u32> {
         self.bytes.read_u32::<LittleEndian>()
+    }
+
+    pub fn peek_u32(&self) -> io::Result<u32> {
+        let mut bytes = self.bytes;
+        bytes.read_u32::<LittleEndian>()
     }
 
     pub fn read_bool(&mut self) -> io::Result<bool> {

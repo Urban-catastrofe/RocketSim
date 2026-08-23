@@ -58,8 +58,7 @@ pub fn compute_delta(pred: &PhysState, real: &PhysRecord) -> PhysicsDelta {
     d.samples[field_index(Field::Pos)] = sample(pred.pos, real.pos.into());
     d.samples[field_index(Field::Vel)] = sample(pred.vel, real.lin_vel.into());
     d.samples[field_index(Field::AngVel)] = sample(pred.ang_vel, real.ang_vel.into());
-    d.samples[field_index(Field::RotFwd)] =
-        sample(pred.get_forward_dir(), real.rot.rows[0].into());
+    d.samples[field_index(Field::RotFwd)] = sample(pred.get_forward_dir(), real.rot.rows[0].into());
     d.samples[field_index(Field::RotUp)] = sample(pred.get_up_dir(), real.rot.rows[2].into());
     d
 }

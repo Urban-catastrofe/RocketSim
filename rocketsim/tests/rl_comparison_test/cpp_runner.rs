@@ -18,10 +18,10 @@ use rocketsim_rs::sim::{
 };
 
 use super::config::HarnessConfig;
-use super::measure::{compute_delta, PhysicsDelta};
+use super::measure::{PhysicsDelta, compute_delta};
+use super::recording::Recording;
 use super::recording::cpp_records::{ControlsRecord, Mat3Record, VecRecord};
 use super::recording::tick_record::TickRecord;
-use super::recording::Recording;
 use super::report::Report;
 use super::rollout::RolloutReport;
 use super::runner;
@@ -222,7 +222,9 @@ fn set_cpp_state_to_record_tick_impl(
         // Reconstruct air_time_since_jump (the observer leaves it 0).
         if cs.air_time_since_jump == 0.0 {
             cs.air_time_since_jump = if cs.has_jumped {
-                (cs.air_time - rocketsim::consts::car::jump::MAX_TIME).max(0.0)
+                (cs.air_time
+                    - rocketsim::consts::car::jump::MAX_TICKS as f32 * rocketsim::consts::TICK_TIME)
+                    .max(0.0)
             } else {
                 2.0 // > DOUBLEJUMP_MAX_DELAY (1.25)
             };
@@ -329,7 +331,7 @@ fn flag_proxy(cs: &CarState) -> rocketsim::CarState {
         is_boosting: cs.is_boosting,
         is_supersonic: cs.is_supersonic,
         is_demoed: cs.is_demoed,
-        jump_time: cs.jump_time,
+        jump_ticks: (cs.jump_time * rocketsim::consts::TICK_RATE).round() as u32,
         air_time: cs.air_time,
         ..Default::default()
     }
@@ -436,8 +438,7 @@ pub fn run_cpp_rollout(recording: &Recording, cfg: &HarnessConfig) -> RolloutRep
 
     let (mut arena, car_ids) = make_cpp_arena(num_cars);
     let mut controls_buf: Vec<CarControls> = vec![CarControls::default(); num_cars];
-    let mut last_mag: Vec<[f32; Field::ALL.len()]> =
-        vec![[0.0; Field::ALL.len()]; num_cars + 1];
+    let mut last_mag: Vec<[f32; Field::ALL.len()]> = vec![[0.0; Field::ALL.len()]; num_cars + 1];
     let mut warmed = false;
 
     for &i in &starts {
@@ -579,10 +580,13 @@ pub fn rollout_comparison_lines(
             let c_mean = c_stats.mean();
             // C++ default arena has noBallRot: ball rot is echoed, not
             // simulated — don't rank it.
-            let cpp_no_rot = is_ball
-                && matches!(field, Field::RotFwd | Field::RotUp)
-                && c_mean < 1e-6;
-            let ratio = if c_mean > 1e-9 { o_mean / c_mean } else { o_mean * 1e9 };
+            let cpp_no_rot =
+                is_ball && matches!(field, Field::RotFwd | Field::RotUp) && c_mean < 1e-6;
+            let ratio = if c_mean > 1e-9 {
+                o_mean / c_mean
+            } else {
+                o_mean * 1e9
+            };
             let verdict = if cpp_no_rot {
                 "(cpp noBallRot: rot not simulated)"
             } else if o_mean.max(c_mean) < 1e-3 {
@@ -635,9 +639,7 @@ pub fn comparison_lines(ours: &mut Report, cpp: &mut Report, cfg: &HarnessConfig
             // rigid body never integrates rotation (bullet m_noRot), so the
             // restored rot is echoed back unchanged. A 0.0000 "error" there is
             // not accuracy — skip ranking it.
-            let cpp_no_rot = is_ball
-                && matches!(field, Field::RotFwd | Field::RotUp)
-                && c_p < 1e-6;
+            let cpp_no_rot = is_ball && matches!(field, Field::RotFwd | Field::RotUp) && c_p < 1e-6;
             // Ratio > 1: C++ is more accurate. Guard against div-by-zero.
             let ratio = if c_p > 1e-6 { o_p / c_p } else { o_p * 1e6 };
             // Only call a winner when the difference is above noise floor.
@@ -675,7 +677,10 @@ pub fn comparison_lines(ours: &mut Report, cpp: &mut Report, cfg: &HarnessConfig
         ours.name,
         (p * 100.0) as i32,
     ))
-    .chain(rows.into_iter().map(|(_, line)| format!("[{}] {}", ours.name, line)))
+    .chain(
+        rows.into_iter()
+            .map(|(_, line)| format!("[{}] {}", ours.name, line)),
+    )
     .collect()
 }
 
@@ -854,7 +859,7 @@ fn record_direct_car(ent: &mut DirectEntity, o: &rocketsim::CarState, c: &CarSta
         _ => {}
     }
 
-    ent.floats[0].add(o.jump_time - c.jump_time);
+    ent.floats[0].add(o.jump_time() - c.jump_time);
     ent.floats[1].add(o.flip_time - c.flip_time);
     ent.floats[2].add(o.air_time - c.air_time);
     ent.floats[3].add(o.air_time_since_jump - c.air_time_since_jump);
@@ -882,7 +887,10 @@ fn record_direct_car(ent: &mut DirectEntity, o: &rocketsim::CarState, c: &CarSta
     for k in 0..4 {
         wheels.add(o.wheels_with_contact[k], c.wheels_with_contact[k]);
     }
-    ent.bools[11].add(o.world_contact_normal.is_some(), c.world_contact.has_contact);
+    ent.bools[11].add(
+        o.world_contact_normal.is_some(),
+        c.world_contact.has_contact,
+    );
 }
 
 fn record_direct_ball(ent: &mut DirectEntity, o: &rocketsim::BallState, c: &BallState) {
@@ -1002,7 +1010,7 @@ pub fn run_direct_compare(recording: &Recording, _cfg: &HarnessConfig) -> Direct
                     to_tick.car_records[0].is_boosting as u8,
                     o.is_jumping as u8,
                     o.has_jumped as u8,
-                    o.jump_time,
+                    o.jump_time(),
                     c.is_jumping as u8,
                     c.has_jumped as u8,
                     c.jump_time,
@@ -1065,7 +1073,13 @@ pub fn direct_lines(report: &DirectReport, cfg: &HarnessConfig) -> Vec<String> {
             } else {
                 rows.push((
                     a.max,
-                    format!("{:<18} mean={:.6} max={:.6} (n={})", name, a.mean(), a.max, a.count),
+                    format!(
+                        "{:<18} mean={:.6} max={:.6} (n={})",
+                        name,
+                        a.mean(),
+                        a.max,
+                        a.count
+                    ),
                 ));
             }
         }
@@ -1081,7 +1095,13 @@ pub fn direct_lines(report: &DirectReport, cfg: &HarnessConfig) -> Vec<String> {
                 } else {
                     rows.push((
                         a.max,
-                        format!("{:<18} mean={:.6} max={:.6} (n={})", name, a.mean(), a.max, a.count),
+                        format!(
+                            "{:<18} mean={:.6} max={:.6} (n={})",
+                            name,
+                            a.mean(),
+                            a.max,
+                            a.count
+                        ),
                     ));
                 }
             }
@@ -1121,7 +1141,10 @@ pub fn direct_lines(report: &DirectReport, cfg: &HarnessConfig) -> Vec<String> {
             },
         ));
         for (_, row) in rows {
-            lines.push(format!("[{}] DIRECT {:>7}  {}", report.name, ent.label, row));
+            lines.push(format!(
+                "[{}] DIRECT {:>7}  {}",
+                report.name, ent.label, row
+            ));
         }
     }
 
@@ -1135,7 +1158,11 @@ pub fn direct_lines(report: &DirectReport, cfg: &HarnessConfig) -> Vec<String> {
 /// of ticks exceeding a few absolute error thresholds — so "we're less
 /// consistent" can be checked against data instead of vibes. Both sims are
 /// scored against the same Rocket League recording.
-pub fn tail_comparison_lines(ours: &mut Report, cpp: &mut Report, _cfg: &HarnessConfig) -> Vec<String> {
+pub fn tail_comparison_lines(
+    ours: &mut Report,
+    cpp: &mut Report,
+    _cfg: &HarnessConfig,
+) -> Vec<String> {
     let mut lines = Vec::new();
     lines.push(format!(
         "==== TAIL/CONSISTENCY {} | percentile & over-threshold rates vs Rocket League (lower = tighter) ====",

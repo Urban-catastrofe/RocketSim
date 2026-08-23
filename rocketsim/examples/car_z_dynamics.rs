@@ -35,7 +35,12 @@ fn main() {
     }
     let s = *arena.get_car_state(idx);
     println!("=== throttle 1.0, 5s ===");
-    println!("max_speed={max_speed:.1}  final_speed={:.1}  final_pos_z={:.3}  boost={:.1}", s.phys.vel.length(), s.phys.pos.z, s.boost);
+    println!(
+        "max_speed={max_speed:.1}  final_speed={:.1}  final_pos_z={:.3}  boost={:.1}",
+        s.phys.vel.length(),
+        s.phys.pos.z,
+        s.boost
+    );
 
     println!("=== throttle 1.0 + boost, 5s ===");
     controls.boost = true;
@@ -46,5 +51,8 @@ fn main() {
         let s = *arena.get_car_state(idx);
         max_speed = max_speed.max(s.phys.vel.length());
     }
-    println!("max_speed={max_speed:.1}  boost={:.1}", arena.get_car_state(idx).boost);
+    println!(
+        "max_speed={max_speed:.1}  boost={:.1}",
+        arena.get_car_state(idx).boost
+    );
 }

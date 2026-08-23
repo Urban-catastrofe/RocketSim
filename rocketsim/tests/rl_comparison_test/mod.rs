@@ -196,9 +196,7 @@ fn test_recording(recording: &Recording) {
             for line in rollout::rollout_lines(&cpp_rollout, &cfg) {
                 println!("{line}");
             }
-            for line in
-                cpp_runner::rollout_comparison_lines(&rollout_report, &cpp_rollout, &cfg)
-            {
+            for line in cpp_runner::rollout_comparison_lines(&rollout_report, &cpp_rollout, &cfg) {
                 println!("{line}");
             }
         }

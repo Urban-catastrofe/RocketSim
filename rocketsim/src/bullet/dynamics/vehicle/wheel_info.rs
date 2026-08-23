@@ -1,14 +1,13 @@
 use glam::{Affine3A, Quat, Vec3A};
 
 use super::{NUM_WHEELS, raycaster::VehicleRaycasterResult};
-use crate::bullet::dynamics::rigid_body::Impulse;
 use crate::{
     bullet::{
         dynamics::{
             constraint_solver::contact_constraint::{
                 resolve_single_bilateral, resolve_single_collision,
             },
-            rigid_body::RigidBody,
+            rigid_body::{Impulse, RigidBody},
         },
         linear_math::QuatExt,
     },
@@ -128,12 +127,10 @@ impl WheelInfo {
 
         let up = chassis_trans.matrix3.z_axis;
         let wheel_trace_len_sq = (self.hard_point - contact_point).dot(up);
-        let mut suspension_length = wheel_trace_len_sq - self.wheels_radius;
 
         let suspension_travel = bullet_vehicle::MAX_SUSPENSION_TRAVEL * UU_TO_BT;
         let min_suspension_len = self.suspension_rest_length_1 - suspension_travel;
         let max_suspension_len = self.suspension_rest_length_1 + suspension_travel;
-        suspension_length = suspension_length.clamp(min_suspension_len, max_suspension_len);
 
         let rel_pos = contact_point - chassis_trans.translation;
         self.vel_at_contact_point = chassis.get_vel_in_local_point(rel_pos);
@@ -141,16 +138,15 @@ impl WheelInfo {
         let proj_vel = contact_normal.dot(self.vel_at_contact_point);
         let denom = contact_normal.dot(up);
 
-        let suspension_relative_vel;
-        let clipped_inv_contact_dot_suspension;
-        if denom > 0.1 {
+        let (suspension_relative_vel, clipped_inv_contact_dot_suspension) = if denom > 0.1 {
             let inv = 1.0 / denom;
-            suspension_relative_vel = proj_vel * inv;
-            clipped_inv_contact_dot_suspension = inv;
+            (proj_vel * inv, inv)
         } else {
-            suspension_relative_vel = 0.0;
-            clipped_inv_contact_dot_suspension = 10.0;
-        }
+            (0.0, 10.0)
+        };
+
+        let suspension_length =
+            (wheel_trace_len_sq - self.wheels_radius).clamp(min_suspension_len, max_suspension_len);
 
         if is_in_contact_with_world {
             let ray_pushback_thresh = self.suspension_rest_length_1 + self.wheels_radius
@@ -197,10 +193,7 @@ impl WheelInfo {
         time_step: f32,
     ) -> Vec3A {
         let friction_scale = chassis.get_mass() / 3.0;
-        let mut axle_dir = self.axle_dir;
-        let proj = axle_dir.dot(contact_normal);
-        axle_dir -= contact_normal * proj;
-        axle_dir = axle_dir.normalize_or_zero();
+        let axle_dir = self.axle_dir.normalize_or_zero();
 
         let forward_dir = contact_normal.cross(axle_dir).normalize_or_zero();
 
@@ -215,9 +208,8 @@ impl WheelInfo {
 
                 let car_rel_contact_point = contact_point - chassis.get_world_trans().translation;
 
-                let v1 = chassis.get_vel_in_local_point(car_rel_contact_point);
-                let v2 = ground_rb.get_vel_in_local_point(car_rel_contact_point);
-                let contact_vel = v1 - v2;
+                let contact_vel = self.vel_at_contact_point
+                    - ground_rb.get_vel_in_local_point(car_rel_contact_point);
                 let mut rel_vel = contact_vel.dot(forward_dir);
 
                 if time_step > 1.0 / 80.0 {

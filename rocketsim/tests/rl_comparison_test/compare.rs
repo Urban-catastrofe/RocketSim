@@ -3,8 +3,10 @@ use std::{collections::HashMap, fmt::Debug};
 use glam::Vec3A;
 use rocketsim::{BallState, CarState, PhysState, consts::TICK_TIME};
 
-use crate::rl_comparison_test::recording::cpp_records::{CarRecord, PhysRecord};
-use crate::rl_comparison_test::recording::tick_record::TickRecord;
+use crate::rl_comparison_test::recording::{
+    cpp_records::{CarRecord, PhysRecord},
+    tick_record::TickRecord,
+};
 
 #[derive(Copy, Clone, Debug)]
 #[allow(dead_code)]
@@ -151,7 +153,7 @@ fn compare_car(car_state: &CarState, car_record: &CarRecord, comparisons: &mut C
     if car_state.has_jumped {
         comparisons.insert(
             "jump_time",
-            Comparison::new_float(car_state.jump_time, car_record.jump_time, TICK_TIME * 2.0),
+            Comparison::new_float(car_state.jump_time(), car_record.jump_time, TICK_TIME * 2.0),
         );
     }
     comparisons.insert(
@@ -189,10 +191,8 @@ fn compare_car(car_state: &CarState, car_record: &CarRecord, comparisons: &mut C
 
     // has_double_jumped / has_flipped derived from the combined
     // `double_jumped_or_flipped` field (same logic as From<CarRecord>)
-    let record_double_jumped =
-        car_record.double_jumped_or_flipped && !car_record.is_flipping;
-    let record_flipped =
-        car_record.double_jumped_or_flipped && car_record.is_flipping;
+    let record_double_jumped = car_record.double_jumped_or_flipped && !car_record.is_flipping;
+    let record_flipped = car_record.double_jumped_or_flipped && car_record.is_flipping;
     comparisons.insert(
         "has_double_jumped",
         Comparison::new_bool(car_state.has_double_jumped, record_double_jumped),
@@ -242,13 +242,9 @@ pub fn compare_states_to_tick(
     tick: &TickRecord,
 ) -> ComparisonSet {
     let mut car_comparisons_all: Vec<ComparisonSet> = Vec::new();
-    for i in 0..car_states.len() {
+    for (car_state, car_record) in car_states.iter().zip(&tick.car_records) {
         let mut car_comparison_set = ComparisonSet::new();
-        compare_car(
-            &car_states[i],
-            &tick.car_records[i],
-            &mut car_comparison_set,
-        );
+        compare_car(car_state, car_record, &mut car_comparison_set);
         car_comparisons_all.push(car_comparison_set);
     }
 
@@ -257,7 +253,7 @@ pub fn compare_states_to_tick(
 
     let mut all_comparisons = ComparisonSet::new();
     for (i, car_comparison_set) in car_comparisons_all.iter().enumerate() {
-        all_comparisons.append_with_prefix(&car_comparison_set, &format!("car_{i}_"));
+        all_comparisons.append_with_prefix(car_comparison_set, &format!("car_{i}_"));
     }
     all_comparisons.append_with_prefix(&ball_comparisons, "ball_");
     all_comparisons

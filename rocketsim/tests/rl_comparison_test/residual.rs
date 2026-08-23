@@ -178,7 +178,8 @@ pub fn analyze(recording: &Recording) {
                 )
             });
             let bs = *arena.get_ball_state();
-            let game_dv = Vec3A::from(to_tick.ball_record.lin_vel) - Vec3A::from(from_tick.ball_record.lin_vel);
+            let game_dv = Vec3A::from(to_tick.ball_record.lin_vel)
+                - Vec3A::from(from_tick.ball_record.lin_vel);
             let sim_dv = bs.phys.vel - Vec3A::from(from_tick.ball_record.lin_vel);
             if touching {
                 ball_touch.add(game_dv, sim_dv);
@@ -203,7 +204,10 @@ pub fn analyze(recording: &Recording) {
     v("ball_free", &ball_free);
 
     if trace && !ball_touch_traces.is_empty() {
-        println!("[{}] RESIDUAL ball-touch trace (tick, gameΔv, simΔv):", recording.name);
+        println!(
+            "[{}] RESIDUAL ball-touch trace (tick, gameΔv, simΔv):",
+            recording.name
+        );
         for (t, g, s) in ball_touch_traces.iter().take(40) {
             println!(
                 "  t={t:<5} gameΔv=({:>8.1},{:>8.1},{:>8.1}) simΔv=({:>8.1},{:>8.1},{:>8.1})",
@@ -241,7 +245,10 @@ pub fn analyze_cadence(recording: &Recording) {
             let mut dv_same = same_vel - before;
             dv_same.z -= GRAVITY_PER_TICK;
             // Next-tick change: next tick's ball velocity minus the hit-tick's.
-            let next = recording.ticks.get(i + stride).map(|t| Vec3A::from(t.ball_record.lin_vel));
+            let next = recording
+                .ticks
+                .get(i + stride)
+                .map(|t| Vec3A::from(t.ball_record.lin_vel));
             let mut dv_next = Vec3A::ZERO;
             if let Some(next_vel) = next {
                 dv_next = next_vel - same_vel;
@@ -254,7 +261,10 @@ pub fn analyze_cadence(recording: &Recording) {
     }
 
     if hits.is_empty() {
-        println!("[{}] HIT CADENCE: no v3 hit records (re-record with the v3 logger)", recording.name);
+        println!(
+            "[{}] HIT CADENCE: no v3 hit records (re-record with the v3 logger)",
+            recording.name
+        );
         return;
     }
 
@@ -283,9 +293,15 @@ pub fn analyze_cadence(recording: &Recording) {
     for (t, j, before, dv_same, dv_next) in hits.iter().take(20) {
         println!(
             "  t={t:<5} car{j} | ball_vel_before=({:>7.1},{:>7.1},{:>7.1}) | same-tick Δv=({:>7.1},{:>7.1},{:>7.1}) | next-tick Δv=({:>7.1},{:>7.1},{:>7.1})",
-            before.x, before.y, before.z,
-            dv_same.x, dv_same.y, dv_same.z,
-            dv_next.x, dv_next.y, dv_next.z
+            before.x,
+            before.y,
+            before.z,
+            dv_same.x,
+            dv_same.y,
+            dv_same.z,
+            dv_next.x,
+            dv_next.y,
+            dv_next.z
         );
     }
     let _ = num_cars;
@@ -326,9 +342,11 @@ pub fn analyze_boost(recording: &Recording) {
             }
             let from_car = &from_tick.car_records[j];
             let fwd = glam::Vec3A::from(to_car.phys.rot.rows[0]);
-            let game_dv = glam::Vec3A::from(to_car.phys.lin_vel) - glam::Vec3A::from(from_car.phys.lin_vel);
+            let game_dv =
+                glam::Vec3A::from(to_car.phys.lin_vel) - glam::Vec3A::from(from_car.phys.lin_vel);
             let game_fwd = game_dv.dot(fwd);
-            let sim_dv = arena.get_car_state(car_idx).phys.vel - glam::Vec3A::from(from_car.phys.lin_vel);
+            let sim_dv =
+                arena.get_car_state(car_idx).phys.vel - glam::Vec3A::from(from_car.phys.lin_vel);
             let sim_fwd = sim_dv.dot(fwd);
             let speed = glam::Vec3A::from(from_car.phys.lin_vel).length();
             let b = ((speed / 500.0) as usize).min(7);
@@ -339,7 +357,10 @@ pub fn analyze_boost(recording: &Recording) {
         }
     }
 
-    println!("[{}] BOOST AUDIT (grounded, per-tick fwd Δv): speed | game | sim | n", recording.name);
+    println!(
+        "[{}] BOOST AUDIT (grounded, per-tick fwd Δv): speed | game | sim | n",
+        recording.name
+    );
     for (b, (g, s, n)) in buckets.iter().enumerate() {
         if *n == 0 {
             continue;
@@ -402,7 +423,10 @@ pub fn analyze_car_speed(recording: &Recording) {
         }
     }
 
-    println!("[{}] CAR SPEED AUDIT (throttle, no boost, grounded): car | game speed | sim speed | game max | sim max | n", recording.name);
+    println!(
+        "[{}] CAR SPEED AUDIT (throttle, no boost, grounded): car | game speed | sim speed | game max | sim max | n",
+        recording.name
+    );
     for (j, (gs, ss, gmx, smx, n)) in acc.iter().enumerate() {
         if *n == 0 {
             continue;
@@ -410,7 +434,11 @@ pub fn analyze_car_speed(recording: &Recording) {
         let nf = *n as f32;
         println!(
             "  car{j} | {:>8.1} | {:>8.1} | {:>8.1} | {:>8.1} | n={}",
-            gs / nf, ss / nf, gmx, smx, n
+            gs / nf,
+            ss / nf,
+            gmx,
+            smx,
+            n
         );
     }
 }
@@ -456,7 +484,10 @@ pub fn analyze_car_z(recording: &Recording) {
         }
     }
 
-    println!("[{}] CAR Z AUDIT (grounded ticks): car | game z_vel | sim z_vel | game z_dv/tick | sim z_dv/tick | n", recording.name);
+    println!(
+        "[{}] CAR Z AUDIT (grounded ticks): car | game z_vel | sim z_vel | game z_dv/tick | sim z_dv/tick | n",
+        recording.name
+    );
     for (j, (gz, sz, gd, sd, n)) in acc.iter().enumerate() {
         if *n == 0 {
             continue;
@@ -464,7 +495,11 @@ pub fn analyze_car_z(recording: &Recording) {
         let nf = *n as f32;
         println!(
             "  car{j} | {:>8.3} | {:>8.3} | {:>+8.3} | {:>+8.3} | n={}",
-            gz / nf, sz / nf, gd / nf, sd / nf, n
+            gz / nf,
+            sz / nf,
+            gd / nf,
+            sd / nf,
+            n
         );
     }
 }
@@ -509,20 +544,35 @@ pub fn analyze_impulse(recording: &Recording) {
     }
 
     if samples.is_empty() {
-        println!("[{}] IMPULSE CALIBRATION: no v3 hit records", recording.name);
+        println!(
+            "[{}] IMPULSE CALIBRATION: no v3 hit records",
+            recording.name
+        );
         return;
     }
 
     // Bucket by speed and report the mean game factor against the sim curve.
     let curve = rocketsim::consts::curves::BALL_CAR_EXTRA_IMPULSE_FACTOR;
-    let input = if by_closing { "closing_speed" } else { "rel_speed" };
+    let input = if by_closing {
+        "closing_speed"
+    } else {
+        "rel_speed"
+    };
     println!(
         "[{}] IMPULSE CALIBRATION (n={}, input={input}): bucket | game factor (mean±σ) | sim curve | n",
         recording.name,
         samples.len()
     );
-    for (lo, hi) in [(0., 500.), (500., 1000.), (1000., 1500.), (1500., 2000.),
-                     (2000., 2500.), (2500., 3000.), (3000., 4000.), (4000., 6000.)] {
+    for (lo, hi) in [
+        (0., 500.),
+        (500., 1000.),
+        (1000., 1500.),
+        (1500., 2000.),
+        (2000., 2500.),
+        (2500., 3000.),
+        (3000., 4000.),
+        (4000., 6000.),
+    ] {
         let bucket: Vec<&(f32, f32, bool)> = samples
             .iter()
             .filter(|(s, _, _)| *s >= lo && *s < hi)
@@ -547,7 +597,10 @@ pub fn analyze_impulse(recording: &Recording) {
     }
 
     if verbose {
-        println!("[{}] IMPULSE CALIBRATION per-hit ({} , game_factor, same_tick):", recording.name, input);
+        println!(
+            "[{}] IMPULSE CALIBRATION per-hit ({} , game_factor, same_tick):",
+            recording.name, input
+        );
         for (s, m, same) in samples.iter().take(40) {
             println!(
                 "  {input}={s:>7.1}  game_factor={:>6.3}  impulse={m:>7.1}  same_tick={same}",
@@ -581,10 +634,7 @@ pub fn analyze_impulse_gap(recording: &Recording) {
 
     for i in (0..recording.ticks.len().saturating_sub(stride + 1)).step_by(stride) {
         // Only ticks with a hit event produce a gap sample.
-        let has_hit = recording.ticks[i]
-            .car_records
-            .iter()
-            .any(|c| c.hit.has_hit);
+        let has_hit = recording.ticks[i].car_records.iter().any(|c| c.hit.has_hit);
         if !has_hit {
             continue;
         }
@@ -624,9 +674,15 @@ pub fn analyze_impulse_gap(recording: &Recording) {
     println!(
         "[{}] IMPULSE GAP (n={n}): mean game Δv=({:>7.1},{:>7.1},{:>7.1}) | sim Δv=({:>7.1},{:>7.1},{:>7.1}) | gap(game-sim)=({:>7.1},{:>7.1},{:>7.1}) | |gap|={:.1}",
         recording.name,
-        g.x, g.y, g.z,
-        s.x, s.y, s.z,
-        gap.x, gap.y, gap.z,
+        g.x,
+        g.y,
+        g.z,
+        s.x,
+        s.y,
+        s.z,
+        gap.x,
+        gap.y,
+        gap.z,
         gap.length()
     );
 }

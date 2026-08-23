@@ -112,18 +112,30 @@ impl Recording {
         let num_ticks = reader.read_u32()?;
         let mut ticks = Vec::with_capacity(num_ticks as usize);
 
+        let legacy_v2 = version == 2
+            && num_cars > 0
+            && reader.peek_u32()? as usize == size_of::<LegacyCarRecordV2>();
+
         for _ in 0..num_ticks {
             let mut car_records = Vec::with_capacity(num_cars);
             for _ in 0..num_cars {
                 let car_record = if version >= 3 {
                     unsafe { reader.read_struct_unsafe::<CarRecord>()? }
+                } else if legacy_v2 {
+                    let v2: LegacyCarRecordV2 = unsafe { reader.read_struct_unsafe()? };
+                    v2.into()
                 } else {
                     let v2: CarRecordV2 = unsafe { reader.read_struct_unsafe()? };
                     v2.into()
                 };
                 car_records.push(car_record);
             }
-            let ball_record = unsafe { reader.read_struct_unsafe::<PhysRecord>() }?;
+            let ball_record = if legacy_v2 {
+                let v2: LegacyPhysRecordV2 = unsafe { reader.read_struct_unsafe()? };
+                v2.into()
+            } else {
+                unsafe { reader.read_struct_unsafe::<PhysRecord>() }?
+            };
             ticks.push(TickRecord {
                 car_records,
                 ball_record,
@@ -239,6 +251,9 @@ mod tests {
         assert_eq!(size_of::<HitRecord>(), 60);
         assert_eq!(size_of::<CarRecord>(), 468);
         assert_eq!(size_of::<CarRecordV2>(), 408);
+        assert_eq!(size_of::<LegacyPhysRecordV2>(), 332);
+        assert_eq!(size_of::<LegacyWheelRecordV2>(), 48);
+        assert_eq!(size_of::<LegacyCarRecordV2>(), 584);
         assert_eq!(size_of::<RecordingInfo>(), 28);
     }
 

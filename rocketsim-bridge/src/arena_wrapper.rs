@@ -17,7 +17,11 @@ pub struct SynthBallHitInfo {
 
 impl Default for SynthBallHitInfo {
     fn default() -> Self {
-        let zero = ffi::FfiVec { x: 0.0, y: 0.0, z: 0.0 };
+        let zero = ffi::FfiVec {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
         Self {
             is_valid: false,
             relative_pos_on_ball: zero,

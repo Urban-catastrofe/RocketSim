@@ -20,9 +20,9 @@ pub const SOR: f32 = 1.0;
 /// Rocket League's Bullet dates from 2013-2015, and a factor of exactly two in
 /// an error-reduction parameter is a plausible version difference; 0.1 is also
 /// already the value of `SPLIT_IMPULSE_TURN_ERP` below. See `how-to-test.md`.
-pub const RAY_PUSHBACK_ERP: f32 = 0.1;
+pub const WHEEL_PUSHBACK_ERP: f32 = 0.1;
 pub const ERP_2: f32 = 0.8;
 pub const SPLIT_IMPULSE_PENETRATION_THRESHOLD: f32 = 1e30;
 pub const SPLIT_IMPULSE_TURN_ERP: f32 = 0.1;
 pub const WARMSTARTING_FACTOR: f32 = 0.85;
-pub const RESTITUTION_VELOCITY_THRESHOLD: f32 = 0.2;
+pub const RESTITUTION_VELOCITY_THRESHOLD: f32 = 1.0;

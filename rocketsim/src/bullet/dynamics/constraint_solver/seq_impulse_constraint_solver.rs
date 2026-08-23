@@ -6,10 +6,7 @@ use crate::bullet::{
         manifold_point::ManifoldPoint, persistent_manifold::PersistentManifold,
     },
     dynamics::rigid_body::{CollisionFlags, RigidBody},
-    linear_math::{
-        plane_space_1,
-        transform_util::{integrate_trans, integrate_trans_no_rot},
-    },
+    linear_math::{integrate_trans, integrate_trans_no_rot, plane_space_1},
 };
 
 struct SpecialResolveInfo {
@@ -379,7 +376,11 @@ impl SeqImpulseConstraintSolver {
         // than 128 contacts — unrealistic in Rocketsim — disables the mask and
         // simply runs every contact on every iteration (correct, no early-exit).
         let masked = n <= 128;
-        let mut should_run = if n >= 128 { u128::MAX } else { (1u128 << n) - 1 };
+        let mut should_run = if n >= 128 {
+            u128::MAX
+        } else {
+            (1u128 << n) - 1
+        };
 
         for _ in 0..contact_solver_info::NUM_ITERATIONS {
             for (i, contact) in self

@@ -3,7 +3,7 @@
 use std::ops::{Index, IndexMut};
 
 use glam::{Mat3A, Vec3A};
-use rocketsim::{CarControls, CarState, PhysState};
+use rocketsim::{CarControls, CarState, PhysState, consts::TICK_RATE};
 #[repr(C)]
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct VecRecord {
@@ -279,6 +279,130 @@ pub struct CarRecordV2 {
     pub air_time_since_jump: f32,
 }
 
+/// Early v2 recordings included per-body impulse diagnostics in `PhysRecord`
+/// and predate the extra wheel and car-state fields in the final v2 layout.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct LegacyImpulseRecordV2 {
+    pub lin_impulse: VecRecord,
+    pub ang_impulse: VecRecord,
+    pub impulse_type: u8,
+    pub is_accum: bool,
+    pub _pad: [u8; 2],
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct LegacyPhysRecordV2 {
+    pub physics_frame: u32,
+    pub pos: VecRecord,
+    pub rot: Mat3Record,
+    pub lin_vel: VecRecord,
+    pub ang_vel: VecRecord,
+    pub has_world_contact: bool,
+    pub world_contact_point: VecRecord,
+    pub world_contact_normal: VecRecord,
+    pub impulse_records_data: [LegacyImpulseRecordV2; 8],
+    pub num_impulse_records: u32,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct LegacyWheelRecordV2 {
+    pub susp_length: f32,
+    pub susp_rel_vel: f32,
+    pub has_contact: bool,
+    pub contact_normal: VecRecord,
+    pub steer_amount: f32,
+    pub engine_force: f32,
+    pub brake: f32,
+    pub lat_friction: f32,
+    pub long_friction: f32,
+    pub extra_pushback: f32,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct LegacyCarRecordV2 {
+    pub phys: LegacyPhysRecordV2,
+    pub is_on_ground: bool,
+    pub is_jumping: bool,
+    pub is_flipping: bool,
+    pub jump_time: f32,
+    pub flip_time: f32,
+    pub has_jumped: bool,
+    pub double_jumped_or_flipped: bool,
+    pub has_flip: bool,
+    pub flip_rel_torque: VecRecord,
+    pub boost_amount: f32,
+    pub is_touching_ball: bool,
+    pub prev_controls: ControlsRecord,
+    pub wheels: [LegacyWheelRecordV2; 4],
+}
+
+impl From<LegacyPhysRecordV2> for PhysRecord {
+    fn from(value: LegacyPhysRecordV2) -> Self {
+        Self {
+            physics_frame: value.physics_frame,
+            pos: value.pos,
+            rot: value.rot,
+            lin_vel: value.lin_vel,
+            ang_vel: value.ang_vel,
+            has_world_contact: value.has_world_contact,
+            world_contact_point: value.world_contact_point,
+            world_contact_normal: value.world_contact_normal,
+        }
+    }
+}
+
+impl From<LegacyWheelRecordV2> for WheelRecord {
+    fn from(value: LegacyWheelRecordV2) -> Self {
+        Self {
+            susp_length: value.susp_length,
+            susp_rel_vel: value.susp_rel_vel,
+            has_contact: value.has_contact,
+            contact_normal: value.contact_normal,
+            steer_amount: value.steer_amount,
+            engine_force: value.engine_force,
+            brake: value.brake,
+            lat_friction: value.lat_friction,
+            long_friction: value.long_friction,
+            extra_pushback: value.extra_pushback,
+            spin_speed: 0.0,
+            friction_curve_input: 0.0,
+        }
+    }
+}
+
+impl From<LegacyCarRecordV2> for CarRecord {
+    fn from(value: LegacyCarRecordV2) -> Self {
+        Self {
+            phys: value.phys.into(),
+            is_on_ground: value.is_on_ground,
+            is_jumping: value.is_jumping,
+            is_flipping: value.is_flipping,
+            jump_time: value.jump_time,
+            flip_time: value.flip_time,
+            has_jumped: value.has_jumped,
+            double_jumped_or_flipped: value.double_jumped_or_flipped,
+            has_flip: value.has_flip,
+            flip_rel_torque: value.flip_rel_torque,
+            boost_amount: value.boost_amount,
+            is_touching_ball: value.is_touching_ball,
+            prev_controls: value.prev_controls,
+            wheels: value.wheels.map(Into::into),
+            is_boosting: false,
+            is_supersonic: false,
+            is_demoed: false,
+            handbrake_val: 0.0,
+            demo_respawn_timer: 0.0,
+            air_time: 0.0,
+            air_time_since_jump: 0.0,
+            hit: HitRecord::default(),
+        }
+    }
+}
+
 impl From<CarRecordV2> for CarRecord {
     fn from(v2: CarRecordV2) -> Self {
         let CarRecordV2 {
@@ -347,7 +471,10 @@ impl From<CarRecord> for CarState {
             is_jumping: phys_record.is_jumping,
             is_flipping: phys_record.is_flipping,
             flip_rel_torque: phys_record.flip_rel_torque.into(),
-            jump_time: phys_record.jump_time,
+            // NOTE: must round, NOT truncate — RL's accumulated f32 lands
+            // below the integer multiple on ~54% of recorded ticks
+            // (e.g. 41.99999928), and truncating would drop a whole tick.
+            jump_ticks: (phys_record.jump_time * TICK_RATE).round() as u32,
             flip_time: phys_record.flip_time,
             has_jumped: phys_record.has_jumped,
             has_double_jumped: double_jumped,

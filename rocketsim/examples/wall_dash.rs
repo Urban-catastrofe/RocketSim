@@ -125,7 +125,11 @@ fn read_u8(c: &mut Cursor<&[u8]>) -> u8 {
 
 unsafe fn read_struct<T: Copy>(c: &mut Cursor<&[u8]>) -> T {
     let size_prefix = read_u32(c) as usize;
-    assert_eq!(size_prefix, std::mem::size_of::<T>(), "struct size mismatch");
+    assert_eq!(
+        size_prefix,
+        std::mem::size_of::<T>(),
+        "struct size mismatch"
+    );
     let mut obj = std::mem::MaybeUninit::<T>::zeroed();
     let slice = std::slice::from_raw_parts_mut(obj.as_mut_ptr() as *mut u8, size_prefix);
     c.read_exact(slice).unwrap();
@@ -212,7 +216,9 @@ fn main() {
             // was the car wall-grounded within the last 20 ticks before this jump?
             let wall_before = (t.saturating_sub(20)..t).any(|k| {
                 let c = ticks[k][0];
-                c.is_on_ground && c.phys.has_world_contact && c.phys.world_contact_normal.z.abs() < 0.5
+                c.is_on_ground
+                    && c.phys.has_world_contact
+                    && c.phys.world_contact_normal.z.abs() < 0.5
             });
             // find next jump press within the double-jump window
             let mut j2 = None;
@@ -226,15 +232,20 @@ fn main() {
                 let gap = t2 - t;
                 let upz = car.phys.rot.rows[2].z;
                 let pos = car.phys.pos;
-                let on_wall_now = car.phys.has_world_contact
-                    && car.phys.world_contact_normal.z.abs() < 0.5;
+                let on_wall_now =
+                    car.phys.has_world_contact && car.phys.world_contact_normal.z.abs() < 0.5;
                 let tag = if wall_before { "WALL-DASH" } else { "jump" };
                 if gap <= 40 {
                     found_any = true;
                     eprintln!(
                         "[{name}] {tag} t={t}->{t2} gap={gap}t pos=({:.0},{:.0},{:.0}) upz={upz:.2} on_wall_now={} av=({:.1},{:.1},{:.1})",
-                        pos.x, pos.y, pos.z, on_wall_now as u8,
-                        car.phys.ang_vel.x, car.phys.ang_vel.y, car.phys.ang_vel.z,
+                        pos.x,
+                        pos.y,
+                        pos.z,
+                        on_wall_now as u8,
+                        car.phys.ang_vel.x,
+                        car.phys.ang_vel.y,
+                        car.phys.ang_vel.z,
                     );
                 }
                 seqs.push((t, t2, gap as f32));

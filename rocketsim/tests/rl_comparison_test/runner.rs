@@ -7,7 +7,9 @@
 //! - [`run_continuous`] sets state once at tick 0 and runs freely, showing how
 //!   errors compound. Informational only.
 
-use rocketsim::{Arena, BallState, CarBodyConfig, CarControls, CarState, GameMode, PhysState, Team};
+use rocketsim::{
+    Arena, BallState, CarBodyConfig, CarControls, CarState, GameMode, PhysState, Team,
+};
 
 use super::config::HarnessConfig;
 use super::measure::compute_delta;
@@ -121,7 +123,7 @@ pub fn set_state_to_record_tick(
         cs.is_on_ground = rep_cs.is_on_ground;
         cs.is_jumping = rep_cs.is_jumping;
         cs.is_flipping = rep_cs.is_flipping;
-        cs.jump_time = rep_cs.jump_time;
+        cs.jump_ticks = rep_cs.jump_ticks;
         cs.flip_time = rep_cs.flip_time;
         cs.has_jumped = rep_cs.has_jumped;
         cs.has_double_jumped = rep_cs.has_double_jumped;
@@ -187,7 +189,8 @@ pub fn set_state_to_record_tick(
                 // the car is actually tumbling off-vertical (a nose-down flip
                 // dives — up-dir z drops below ~0.9). A level auto-roll tumble
                 // (up-dir z ≈ 1.0) must not fire the z-damp.
-                let zd = rocketsim::consts::car::flip::Z_DAMP_START..=rocketsim::consts::car::flip::Z_DAMP_END;
+                let zd = rocketsim::consts::car::flip::Z_DAMP_START
+                    ..=rocketsim::consts::car::flip::Z_DAMP_END;
                 let up_z = tick.car_records[i].phys.rot.rows[2].z;
                 // Right-side-up but tilted off-vertical (0 < upz < 0.9): a
                 // nose-down flip. An upside-down tumble (upz < 0, e.g. the
@@ -199,16 +202,16 @@ pub fn set_state_to_record_tick(
         }
 
         // Same class of bug for the jump: the RLPR observer reports
-        // is_jumping=true + jump_time=0, but the velocity field tells us whether
+        // is_jumping=true + jump_ticks=0, but the velocity field tells us whether
         // the immediate force was ALREADY applied:
         //   * SOLO recordings: the state carries the post-impulse velocity
-        //     (vz ≈ 295 UU/s) — restoring jump_time=0 would make `update_jump`
+        //     (vz ≈ 295 UU/s) — restoring jump_ticks=0 would make `update_jump`
         //     re-apply the immediate force, doubling the launch (vz ≈ 590).
         //   * MATCH recordings: the state still has vz ≈ 0 (grounded) — the
         //     impulse is applied DURING this tick, so the sim MUST apply it.
         // Decide from the vertical velocity instead of bumping unconditionally.
-        if cs.is_jumping && cs.jump_time == 0.0 && cs.phys.vel.z > 100.0 {
-            cs.jump_time = rocketsim::consts::TICK_TIME;
+        if cs.is_jumping && cs.jump_ticks == 0 && cs.phys.vel.z > 100.0 {
+            cs.jump_ticks = 1;
         }
 
         // Derived from `is_on_ground` rather than from the recording, even
@@ -230,12 +233,14 @@ pub fn set_state_to_record_tick(
         // closed the double-jump/flip window and the sim missed every airborne
         // flip in match replays. Reconstruct it instead: the recording's
         // air_time equals time-since-jump-start while airborne, and the jump's
-        // active phase lasts at most jump::MAX_TIME, so
-        // air_time_since_jump ≈ air_time - MAX_TIME. Only jumpers can flip —
+        // active phase lasts at most jump::MAX_TICKS, so
+        // air_time_since_jump ≈ air_time - MAX_TICKS / TICK_RATE. Only jumpers can flip —
         // an airborne car that never jumped keeps the window closed.
         if cs.air_time_since_jump == 0.0 {
             cs.air_time_since_jump = if cs.has_jumped {
-                (cs.air_time - rocketsim::consts::car::jump::MAX_TIME).max(0.0)
+                (cs.air_time
+                    - rocketsim::consts::car::jump::MAX_TICKS as f32 * rocketsim::consts::TICK_TIME)
+                    .max(0.0)
             } else {
                 2.0 // > DOUBLEJUMP_MAX_DELAY (1.25)
             };
