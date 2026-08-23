@@ -173,14 +173,27 @@ fn run_rollout_shard(recording: &Recording, shard: &[usize], cfg: &HarnessConfig
 
         let from_tick = &recording.ticks[i];
         controls_for(&recording.ticks[i + stride], &mut controls_buf);
-        runner::set_state_to_record_tick(&mut arena, &car_idcs, from_tick, &controls_buf);
+        let previous_tick = i.checked_sub(stride).map(|i| &recording.ticks[i]);
+        runner::set_state_to_record_tick(
+            &mut arena,
+            &car_idcs,
+            from_tick,
+            previous_tick,
+            &controls_buf,
+        );
 
         if !warmed {
             for _ in 0..runner::SHARD_WARMUP_TICKS {
                 arena.step_tick();
             }
             // Re-restore the exact start pose now that manifolds are warm.
-            runner::set_state_to_record_tick(&mut arena, &car_idcs, from_tick, &controls_buf);
+            runner::set_state_to_record_tick(
+                &mut arena,
+                &car_idcs,
+                from_tick,
+                previous_tick,
+                &controls_buf,
+            );
             warmed = true;
         }
 

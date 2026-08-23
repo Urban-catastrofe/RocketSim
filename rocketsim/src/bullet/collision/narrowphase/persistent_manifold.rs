@@ -7,6 +7,15 @@ use crate::bullet::{
     linear_math::{AffineExt, plane_space_1},
 };
 
+#[derive(Debug, Copy, Clone)]
+pub struct ContactSolveInfo {
+    pub manifold_point: ManifoldPoint,
+    pub normal_impulse: f32,
+    pub push_impulse: f32,
+    pub relative_velocity_before: Vec3A,
+    pub relative_velocity_after: Vec3A,
+}
+
 pub trait ContactAddedCallback {
     fn callback(
         &mut self,
@@ -15,6 +24,14 @@ pub trait ContactAddedCallback {
         body_b: &RigidBody,
         idx: Option<usize>,
     );
+
+    fn contact_solved(
+        &mut self,
+        _contact: ContactSolveInfo,
+        _body_a: &RigidBody,
+        _body_b: &RigidBody,
+    ) {
+    }
 }
 
 pub const CONTACT_BREAKING_THRESHOLD: f32 = 0.02;

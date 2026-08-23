@@ -30,8 +30,8 @@ use crate::{
     make_tile_shapes,
     shared::quantize,
     sim::{
-        ArenaEvent, Ball, BallState, BoostPad, CarHitBallEvent, CarHitCarEvent, CarHitWorldEvent,
-        DemoMode, UserInfoTypes, arena::ArenaEventList,
+        ArenaEvent, Ball, BallHitConfig, BallState, BoostPad, CarHitBallEvent, CarHitCarEvent,
+        CarHitWorldEvent, DemoMode, UserInfoTypes, arena::ArenaEventList,
     },
 };
 
@@ -471,6 +471,7 @@ impl Arena {
     /// Steps the arena for 1 tick, returning the events produced during that tick
     pub fn step_tick(&mut self) -> &[ArenaEvent] {
         self.events.clear();
+        self.contact_tracker.clear_solved_contacts();
 
         // NOTE: This needs to be called manually
         // TODO: Make it not need to be called manually
@@ -621,6 +622,15 @@ impl Arena {
     #[inline]
     pub const fn mutator_config(&self) -> &MutatorConfig {
         &self.config.mutators
+    }
+
+    #[inline]
+    pub const fn ball_hit_config(&self) -> &BallHitConfig {
+        &self.ball.hit_config
+    }
+
+    pub fn set_ball_hit_config(&mut self, config: BallHitConfig) {
+        self.ball.hit_config = config;
     }
 
     pub fn set_ball_state(&mut self, ball_state: BallState) {
@@ -819,6 +829,12 @@ impl Arena {
     /// Returns the events generated during the last stepped tick
     pub fn get_last_step_events(&self) -> &[ArenaEvent] {
         self.events.events()
+    }
+
+    /// Returns solved car-ball contacts from the last stepped tick.
+    #[must_use]
+    pub fn get_last_step_car_ball_contacts(&self) -> &[crate::CarBallContactInfo] {
+        self.contact_tracker.solved_car_ball_contacts()
     }
 
     #[must_use]

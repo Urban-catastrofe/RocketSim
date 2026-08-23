@@ -230,6 +230,13 @@ impl GridBroadphase {
         }
     }
 
+    pub fn needs_collision(&self, proxy_a_idx: usize, proxy_b_idx: usize) -> bool {
+        HashedOverlappingPairCache::needs_broadphase_collision(
+            &self.handles[proxy_a_idx],
+            &self.handles[proxy_b_idx],
+        )
+    }
+
     pub fn create_proxy(
         &mut self,
         aabb: Aabb,
@@ -313,12 +320,14 @@ impl GridBroadphase {
         &mut self,
         collision_objs: &[RigidBody],
         dispatcher: &mut CollisionDispatcher,
+        skipped_pairs: &[(usize, usize)],
         contact_added_callback: &mut T,
     ) {
         self.pair_cache.process_all_overlapping_pairs(
             collision_objs,
             dispatcher,
             &self.handles,
+            skipped_pairs,
             contact_added_callback,
         );
     }

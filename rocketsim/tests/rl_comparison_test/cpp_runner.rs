@@ -945,7 +945,13 @@ pub fn run_direct_compare(recording: &Recording, _cfg: &HarnessConfig) -> Direct
             cpp_controls[j] = controls(car_record.prev_controls);
         }
 
-        runner::set_state_to_record_tick(&mut rust_arena, &rust_idcs, from_tick, &rust_controls);
+        runner::set_state_to_record_tick(
+            &mut rust_arena,
+            &rust_idcs,
+            from_tick,
+            i.checked_sub(stride).map(|i| &recording.ticks[i]),
+            &rust_controls,
+        );
         // Align the Rust restore with the C++ one so both sims start from the
         // exact same state: the C++ restore gives world contact back from the
         // recording (the Rust runner clears it) and resets the bump cooldown.

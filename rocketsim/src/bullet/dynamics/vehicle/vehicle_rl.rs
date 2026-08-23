@@ -125,10 +125,13 @@ impl VehicleRL {
         &mut self,
         collision_world: &mut DiscreteDynamicsWorld,
         time_step: f32,
+        apply_suspension: bool,
     ) {
         let chassis = &mut collision_world.bodies_mut()[self.chassis_body_idx];
-        for wheel in &mut self.wheels {
-            wheel.update_suspension(chassis, time_step);
+        if apply_suspension {
+            for wheel in &mut self.wheels {
+                wheel.update_suspension(chassis, time_step);
+            }
         }
 
         // note: all suspension MUST be updated before impulses are applied

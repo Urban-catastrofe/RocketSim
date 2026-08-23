@@ -31,11 +31,7 @@ pub(crate) struct Ball {
     pub ground_stick_applied: bool,
     /// Tunable car-ball extra-hit impulse parameters.
     pub hit_config: BallHitConfig,
-    /// Extra car-ball hit impulse computed during contact that is applied at
-    /// the start of the *next* tick. RL applies the reactive contact impulse
-    /// on the contact tick and the extra "carry" impulse one tick later;
-    /// adding it to `accum_lin_vel` after the solver runs (as before) let
-    /// `clear_accum_forces()` wipe it before it could ever take effect.
+    /// Extra car-ball hit impulse ready to apply at tick finish.
     pub(crate) pending_hit_impulse: Vec3A,
 }
 

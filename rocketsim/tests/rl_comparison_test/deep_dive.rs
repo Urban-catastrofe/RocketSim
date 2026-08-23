@@ -104,7 +104,13 @@ pub fn dump_window(recording: &Recording, cfg: &HarnessConfig, center: usize, en
         for (j, cr) in to_tick.car_records.iter().enumerate() {
             controls_buf[j] = cr.prev_controls.into();
         }
-        set_state_to_record_tick(&mut arena, &car_idcs, from_tick, &controls_buf);
+        set_state_to_record_tick(
+            &mut arena,
+            &car_idcs,
+            from_tick,
+            i.checked_sub(stride).map(|i| &recording.ticks[i]),
+            &controls_buf,
+        );
         arena.step_tick();
 
         let time_s = i as f32 * TICK_TIME / stride as f32;

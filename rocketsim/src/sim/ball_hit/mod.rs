@@ -11,6 +11,6 @@ mod config;
 mod impulse;
 mod state;
 
-pub use config::BallHitConfig;
+pub use config::{BallHitConfig, HitCadence};
 pub use impulse::{HitContext, can_fire, compute_impulse};
 pub use state::BallHitState;

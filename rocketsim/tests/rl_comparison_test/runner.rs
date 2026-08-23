@@ -8,7 +8,8 @@
 //!   errors compound. Informational only.
 
 use rocketsim::{
-    Arena, BallState, CarBodyConfig, CarControls, CarState, GameMode, PhysState, Team,
+    Arena, BallHitState, BallState, CarBodyConfig, CarControls, CarState, GameMode, HitCadence,
+    PhysState, Team,
 };
 
 use super::config::HarnessConfig;
@@ -95,6 +96,27 @@ pub fn has_discontinuity(recording: &Recording, i: usize, stride: usize) -> bool
 
 pub fn make_arena(num_cars: usize) -> (Arena, Vec<usize>) {
     let mut arena = Arena::new(GameMode::Soccar);
+    if let Ok(scale) = std::env::var("RL_BALL_HIT_SCALE") {
+        let mut mutators = *arena.mutator_config();
+        mutators.ball_hit_extra_force_scale = scale
+            .parse()
+            .expect("RL_BALL_HIT_SCALE must be a finite number");
+        assert!(
+            mutators.ball_hit_extra_force_scale.is_finite(),
+            "RL_BALL_HIT_SCALE must be a finite number"
+        );
+        arena.set_mutator_config(mutators);
+    }
+    if let Ok(cadence) = std::env::var("RL_HIT_CADENCE") {
+        let mut config = *arena.ball_hit_config();
+        config.cadence = match cadence.as_str() {
+            "once" => HitCadence::OncePerEpisode,
+            "other" => HitCadence::EveryOtherTick,
+            "every" => HitCadence::EveryTick,
+            _ => panic!("RL_HIT_CADENCE must be once, other, or every"),
+        };
+        arena.set_ball_hit_config(config);
+    }
     let car_idcs: Vec<usize> = (0..num_cars)
         .map(|i| {
             let team = if (i % 2) == 0 {
@@ -108,10 +130,14 @@ pub fn make_arena(num_cars: usize) -> (Arena, Vec<usize>) {
     (arena, car_idcs)
 }
 
+/// Restore recorded public state plus the extra-hit cadence state implied by
+/// the immediately preceding frame. Without `previous_tick`, cadence timestamps
+/// from an unrelated sampled tick would survive the restore.
 pub fn set_state_to_record_tick(
     arena: &mut Arena,
     car_idcs: &[usize],
     tick: &TickRecord,
+    previous_tick: Option<&TickRecord>,
     car_controls: &[CarControls],
 ) {
     for (i, &car_idx) in car_idcs.iter().enumerate() {
@@ -266,6 +292,41 @@ pub fn set_state_to_record_tick(
     let rep_bs_phys: PhysState = tick.ball_record.into();
     let mut bs = *arena.get_ball_state();
     bs.phys = rep_bs_phys;
+    let previous_arena_tick = arena.tick_count().saturating_sub(1);
+    bs.ball_hit = previous_tick.map_or(BallHitState::DEFAULT, |previous| {
+        let contact_slack = std::env::var("RL_CONTACT_STATE_SLACK")
+            .map(|value| {
+                value
+                    .parse::<f32>()
+                    .expect("RL_CONTACT_STATE_SLACK must be a finite number")
+            })
+            .unwrap_or(0.0);
+        assert!(
+            contact_slack.is_finite() && contact_slack >= 0.0,
+            "RL_CONTACT_STATE_SLACK must be a finite non-negative number"
+        );
+        let ball_pos = glam::Vec3A::from(previous.ball_record.pos);
+        let was_touching = previous.car_records.iter().any(|car| {
+            super::residual::ball_touches_car_with_slack(
+                ball_pos,
+                car.phys.pos.into(),
+                glam::Mat3A::from_cols(
+                    car.phys.rot.rows[0].into(),
+                    car.phys.rot.rows[1].into(),
+                    car.phys.rot.rows[2].into(),
+                ),
+                contact_slack,
+            )
+        });
+        BallHitState {
+            last_impulse_tick: previous
+                .car_records
+                .iter()
+                .any(|car| car.hit.has_hit)
+                .then_some(previous_arena_tick),
+            last_contact_tick: was_touching.then_some(previous_arena_tick),
+        }
+    });
     arena.set_ball_state(bs);
 }
 
@@ -308,7 +369,13 @@ fn run_per_tick_shard(recording: &Recording, shard: &[usize]) -> Report {
         let to_tick = &recording.ticks[first + stride];
         controls_for(to_tick, &mut controls_buf);
         for _ in 0..SHARD_WARMUP_TICKS {
-            set_state_to_record_tick(&mut arena, &car_idcs, from_tick, &controls_buf);
+            set_state_to_record_tick(
+                &mut arena,
+                &car_idcs,
+                from_tick,
+                first.checked_sub(stride).map(|i| &recording.ticks[i]),
+                &controls_buf,
+            );
             arena.step_tick();
         }
     }
@@ -326,7 +393,13 @@ fn run_per_tick_shard(recording: &Recording, shard: &[usize]) -> Report {
         let to_tick = &recording.ticks[i + stride];
         controls_for(to_tick, &mut controls_buf);
 
-        set_state_to_record_tick(&mut arena, &car_idcs, from_tick, &controls_buf);
+        set_state_to_record_tick(
+            &mut arena,
+            &car_idcs,
+            from_tick,
+            i.checked_sub(stride).map(|i| &recording.ticks[i]),
+            &controls_buf,
+        );
         arena.step_tick();
 
         for (j, &car_idx) in car_idcs.iter().enumerate() {
@@ -456,7 +529,7 @@ pub fn run_continuous(
 
         if i == 0 {
             let from_tick = &recording.ticks[i];
-            set_state_to_record_tick(arena, car_idcs, from_tick, &controls_buf);
+            set_state_to_record_tick(arena, car_idcs, from_tick, None, &controls_buf);
         } else {
             for (j, &car_idx) in car_idcs.iter().enumerate() {
                 arena.set_car_controls(car_idx, controls_buf[j]);

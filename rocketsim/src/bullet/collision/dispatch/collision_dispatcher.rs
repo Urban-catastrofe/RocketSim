@@ -193,14 +193,20 @@ impl CollisionDispatcher {
         collision_objs: &[RigidBody],
         proxy0: &BroadphaseProxy,
         proxy1: &BroadphaseProxy,
+        skipped_pairs: &[(usize, usize)],
         contact_added_callback: &mut T,
     ) {
         let rb0 = &collision_objs[proxy0.client_obj_idx as usize];
         let rb1 = &collision_objs[proxy1.client_obj_idx as usize];
+        let pair = (
+            rb0.world_array_idx.min(rb1.world_array_idx),
+            rb0.world_array_idx.max(rb1.world_array_idx),
+        );
 
         if !rb0.is_active() && !rb1.is_active()
             || !rb0.has_contact_response()
             || !rb1.has_contact_response()
+            || skipped_pairs.contains(&pair)
         {
             return;
         }
@@ -210,12 +216,35 @@ impl CollisionDispatcher {
         }
     }
 
+    pub fn dispatch_pair<T: ContactAddedCallback>(
+        &mut self,
+        collision_objs: &[RigidBody],
+        body_a_idx: usize,
+        body_b_idx: usize,
+        contact_added_callback: &mut T,
+    ) -> bool {
+        let body_a = &collision_objs[body_a_idx];
+        let body_b = &collision_objs[body_b_idx];
+        if let Some(manifold) = Self::process_collision(body_a, body_b, contact_added_callback) {
+            self.manifolds.push(manifold);
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn dispatch_all_collision_pairs<T: ContactAddedCallback>(
         &mut self,
         collision_objs: &[RigidBody],
         pair_cache: &mut GridBroadphase,
+        skipped_pairs: &[(usize, usize)],
         contact_added_callback: &mut T,
     ) {
-        pair_cache.process_all_overlapping_pairs(collision_objs, self, contact_added_callback);
+        pair_cache.process_all_overlapping_pairs(
+            collision_objs,
+            self,
+            skipped_pairs,
+            contact_added_callback,
+        );
     }
 }

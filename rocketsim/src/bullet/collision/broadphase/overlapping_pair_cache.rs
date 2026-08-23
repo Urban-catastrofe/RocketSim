@@ -81,6 +81,7 @@ impl HashedOverlappingPairCache {
         collision_objs: &[RigidBody],
         dispatcher: &mut CollisionDispatcher,
         handles: &[BroadphaseProxy],
+        skipped_pairs: &[(usize, usize)],
         contact_added_callback: &mut T,
     ) {
         for pair in &self.overlapping_pair_array {
@@ -88,6 +89,7 @@ impl HashedOverlappingPairCache {
                 collision_objs,
                 &handles[pair.proxy0],
                 &handles[pair.proxy1],
+                skipped_pairs,
                 contact_added_callback,
             );
         }

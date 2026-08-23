@@ -3,18 +3,25 @@ use glam::Vec3A;
 use super::{
     collision_dispatcher::CollisionDispatcher,
     quad_ray_callbacks::{BridgeTriQuadRayCallback, QuadRayResultCallback},
+    sphere_obb_collision_alg,
 };
 use crate::{
     bullet::{
         collision::{
             broadphase::GridBroadphase,
-            narrowphase::persistent_manifold::{CONTACT_BREAKING_THRESHOLD, ContactAddedCallback},
-            shapes::collision_shape::CollisionShapes,
+            narrowphase::persistent_manifold::{
+                CONTACT_BREAKING_THRESHOLD, ContactAddedCallback, PersistentManifold,
+            },
+            shapes::{
+                collision_shape::CollisionShapes, compound_shape::CompoundShape,
+                sphere_shape::SphereShape,
+            },
         },
         dynamics::rigid_body::RigidBody,
         linear_math::AffineExt,
     },
     shared::QuadRayInfo,
+    sim::UserInfoTypes,
 };
 
 pub struct CollisionWorld {
@@ -103,6 +110,7 @@ impl CollisionWorld {
 
     pub fn perform_discrete_collision_detection<T: ContactAddedCallback>(
         &mut self,
+        skipped_pairs: &[(usize, usize)],
         contact_added_callback: &mut T,
     ) {
         self.update_aabbs();
@@ -111,8 +119,157 @@ impl CollisionWorld {
         self.dispatcher1.dispatch_all_collision_pairs(
             &self.collision_objs,
             &mut self.broadphase_pair_cache,
+            skipped_pairs,
             contact_added_callback,
         );
+    }
+
+    fn can_collide_pair(&self, body_a_idx: usize, body_b_idx: usize) -> bool {
+        let body_a = &self.collision_objs[body_a_idx];
+        let body_b = &self.collision_objs[body_b_idx];
+
+        (body_a.is_active() || body_b.is_active())
+            && body_a.has_contact_response()
+            && body_b.has_contact_response()
+            && self.broadphase_pair_cache.needs_collision(
+                body_a.get_broadphase_handle(),
+                body_b.get_broadphase_handle(),
+            )
+    }
+
+    pub fn dispatch_pair<T: ContactAddedCallback>(
+        &mut self,
+        body_a_idx: usize,
+        body_b_idx: usize,
+        contact_added_callback: &mut T,
+    ) -> bool {
+        if !self.can_collide_pair(body_a_idx, body_b_idx) {
+            return false;
+        }
+
+        self.dispatcher1.dispatch_pair(
+            &self.collision_objs,
+            body_a_idx,
+            body_b_idx,
+            contact_added_callback,
+        )
+    }
+
+    fn car_ball_pair(
+        &self,
+        body_a_idx: usize,
+        body_b_idx: usize,
+    ) -> Option<(&RigidBody, &SphereShape, &RigidBody, &CompoundShape)> {
+        let body_a = &self.collision_objs[body_a_idx];
+        let body_b = &self.collision_objs[body_b_idx];
+
+        let (sphere, obb) = match (body_a.user_idx, body_b.user_idx) {
+            (UserInfoTypes::Ball, UserInfoTypes::Car) => (body_a, body_b),
+            (UserInfoTypes::Car, UserInfoTypes::Ball) => (body_b, body_a),
+            _ => return None,
+        };
+        let CollisionShapes::Sphere(sphere_shape) = sphere.get_collision_shape() else {
+            return None;
+        };
+        let CollisionShapes::Compound(obb_shape) = obb.get_collision_shape() else {
+            return None;
+        };
+
+        Some((sphere, sphere_shape, obb, obb_shape))
+    }
+
+    pub fn car_ball_separation(&self, pair: (usize, usize)) -> Option<f32> {
+        let (sphere, sphere_shape, obb, obb_shape) = self.car_ball_pair(pair.0, pair.1)?;
+        Some(sphere_obb_collision_alg::separation(
+            sphere,
+            sphere_shape,
+            obb,
+            obb_shape,
+        ))
+    }
+
+    pub fn car_ball_contact_threshold(&self, pair: (usize, usize)) -> Option<f32> {
+        let (sphere, _, obb, _) = self.car_ball_pair(pair.0, pair.1)?;
+        Some(PersistentManifold::new(sphere, obb).contact_breaking_threshold)
+    }
+
+    pub fn car_ball_time_of_impact(
+        &self,
+        pair: (usize, usize),
+        time_step: f32,
+        include_accumulated_velocity: bool,
+    ) -> Option<f32> {
+        let (sphere, sphere_shape, obb, obb_shape) = self.car_ball_pair(pair.0, pair.1)?;
+        let sphere_lin_vel = sphere.lin_vel
+            + if include_accumulated_velocity {
+                sphere.accum_lin_vel
+            } else {
+                Vec3A::ZERO
+            };
+        let obb_lin_vel = obb.lin_vel
+            + if include_accumulated_velocity {
+                obb.accum_lin_vel
+            } else {
+                Vec3A::ZERO
+            };
+        let obb_ang_vel = obb.ang_vel
+            + if include_accumulated_velocity {
+                obb.accum_ang_vel
+            } else {
+                Vec3A::ZERO
+            };
+
+        sphere_obb_collision_alg::time_of_impact(
+            sphere,
+            sphere_shape,
+            sphere_lin_vel,
+            obb,
+            obb_shape,
+            obb_lin_vel,
+            obb_ang_vel,
+            time_step,
+        )
+    }
+
+    pub fn car_ball_pairs(&self) -> Vec<(usize, usize)> {
+        let ball_indices: Vec<_> = self
+            .collision_objs
+            .iter()
+            .filter(|body| body.user_idx == UserInfoTypes::Ball)
+            .map(|body| body.world_array_idx)
+            .collect();
+        let car_indices: Vec<_> = self
+            .collision_objs
+            .iter()
+            .filter(|body| body.user_idx == UserInfoTypes::Car)
+            .map(|body| body.world_array_idx)
+            .collect();
+
+        let mut pairs = Vec::new();
+        for ball_idx in ball_indices {
+            for &car_idx in &car_indices {
+                let pair = (ball_idx.min(car_idx), ball_idx.max(car_idx));
+                if self.car_ball_pair(pair.0, pair.1).is_some()
+                    && self.can_collide_pair(pair.0, pair.1)
+                {
+                    pairs.push(pair);
+                }
+            }
+        }
+        pairs
+    }
+
+    pub fn car_ball_toi_pairs(&self, time_step: f32) -> Vec<(usize, usize)> {
+        self.car_ball_pairs()
+            .into_iter()
+            .filter(|&pair| {
+                self.car_ball_separation(pair)
+                    .is_some_and(|separation| separation > 0.0)
+                    && self
+                        .car_ball_time_of_impact(pair, time_step, true)
+                        .is_some()
+            })
+            .collect()
     }
 
     pub(crate) fn quad_ray_test<T: QuadRayResultCallback>(

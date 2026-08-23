@@ -311,7 +311,7 @@ impl Car {
             let lat_dir = wheel.axle_dir;
             let long_dir = lat_dir.cross(raycast_info.contact_normal);
 
-            let wheel_delta = raycast_info.contact_point - car_pos;
+            let wheel_delta = wheel.hard_point - car_pos;
             let cross_vec = (car_ang_vel.cross(wheel_delta) + car_vel) * BT_TO_UU;
 
             let base_friction = cross_vec.dot(lat_dir).abs();
@@ -872,6 +872,7 @@ impl Car {
         };
 
         let jump_pressed = self.state.controls.jump && !self.state.prev_controls.jump;
+        let jump_started = jump_pressed && self.state.is_on_ground && !self.state.has_jumped;
 
         {
             let rb = &mut collision_world.bodies_mut()[self.rigid_body_idx];
@@ -913,9 +914,10 @@ impl Car {
         // step so the position integrates them this tick (the C++ `_PreTickUpdate`
         // calls `updateVehicleSecond` here). Previously applied in
         // `post_tick_update` (after integration), which left the reported
-        // velocity leading the position by one tick.
+        // velocity leading the position by one tick. Rocket League's launch
+        // delta excludes the suspension load sampled before a jump starts.
         self.bullet_vehicle
-            .update_vehicle_second(collision_world, TICK_TIME);
+            .update_vehicle_second(collision_world, TICK_TIME, !jump_started);
 
         {
             let rb = &mut collision_world.bodies_mut()[self.rigid_body_idx];

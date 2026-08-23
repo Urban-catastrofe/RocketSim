@@ -109,6 +109,10 @@ fn test_recording(recording: &Recording) {
                 residual::analyze_boost(recording);
                 return;
             }
+            "11" => {
+                residual::analyze_hit_trigger(recording);
+                return;
+            }
             _ => {}
         }
     }

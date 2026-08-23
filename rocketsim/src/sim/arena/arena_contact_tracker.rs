@@ -5,12 +5,13 @@ use crate::{
         collision::{
             dispatch::internal_edge_utility::adjust_internal_edge_contacts,
             narrowphase::{
-                manifold_point::ManifoldPoint, persistent_manifold::ContactAddedCallback,
+                manifold_point::ManifoldPoint,
+                persistent_manifold::{ContactAddedCallback, ContactSolveInfo},
             },
         },
         dynamics::rigid_body::RigidBody,
     },
-    consts,
+    consts::{self, BT_TO_UU},
     sim::UserInfoTypes,
 };
 
@@ -23,15 +24,35 @@ pub(crate) struct ContactRecord {
     pub manifold_point: ManifoldPoint,
 }
 
+/// Solver output for one car-ball manifold point from the last simulated tick.
+#[derive(Debug, Copy, Clone)]
+pub struct CarBallContactInfo {
+    pub car_idx: usize,
+    /// Point on the ball, in Unreal units.
+    pub contact_point: glam::Vec3A,
+    /// Contact normal pointing from the car toward the ball.
+    pub contact_normal: glam::Vec3A,
+    /// Signed manifold distance in Unreal units; negative values penetrate.
+    pub distance: f32,
+    /// Raw Bullet normal and split-penetration impulses.
+    pub normal_impulse: f32,
+    pub push_impulse: f32,
+    /// Ball contact-point velocity relative to the car, in Unreal units/s.
+    pub relative_velocity_before: glam::Vec3A,
+    pub relative_velocity_after: glam::Vec3A,
+}
+
 // A struct to be accessed through the bullet contact callbacks
 pub(crate) struct ArenaContactTracker {
     collision_records: Vec<ContactRecord>,
+    solved_car_ball_contacts: Vec<CarBallContactInfo>,
 }
 
 impl ArenaContactTracker {
     pub fn new() -> Self {
         Self {
             collision_records: Vec::with_capacity(4), // Rarely exceeded
+            solved_car_ball_contacts: Vec::with_capacity(4),
         }
     }
 
@@ -45,6 +66,14 @@ impl ArenaContactTracker {
 
     pub fn clear_records(&mut self) {
         self.collision_records.clear();
+    }
+
+    pub fn solved_car_ball_contacts(&self) -> &[CarBallContactInfo] {
+        &self.solved_car_ball_contacts
+    }
+
+    pub fn clear_solved_contacts(&mut self) {
+        self.solved_car_ball_contacts.clear();
     }
 }
 
@@ -95,5 +124,34 @@ impl ContactAddedCallback for ArenaContactTracker {
         if let Some(idx) = idx {
             adjust_internal_edge_contacts(manifold_point, body_b, idx);
         }
+    }
+
+    fn contact_solved(
+        &mut self,
+        contact: ContactSolveInfo,
+        body_a: &RigidBody,
+        body_b: &RigidBody,
+    ) {
+        let (car, ball_is_body_a) = match (body_a.user_idx, body_b.user_idx) {
+            (UserInfoTypes::Ball, UserInfoTypes::Car) => (body_b, true),
+            (UserInfoTypes::Car, UserInfoTypes::Ball) => (body_a, false),
+            _ => return,
+        };
+        let direction = if ball_is_body_a { 1.0 } else { -1.0 };
+        let point = if ball_is_body_a {
+            contact.manifold_point.pos_world_on_a
+        } else {
+            contact.manifold_point.pos_world_on_b
+        };
+        self.solved_car_ball_contacts.push(CarBallContactInfo {
+            car_idx: car.user_pointer,
+            contact_point: point * BT_TO_UU,
+            contact_normal: contact.manifold_point.normal_world_on_b * direction,
+            distance: contact.manifold_point.distance_1 * BT_TO_UU,
+            normal_impulse: contact.normal_impulse,
+            push_impulse: contact.push_impulse,
+            relative_velocity_before: contact.relative_velocity_before * direction * BT_TO_UU,
+            relative_velocity_after: contact.relative_velocity_after * direction * BT_TO_UU,
+        });
     }
 }
