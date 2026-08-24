@@ -1395,6 +1395,72 @@ The flip z-damp gate survived the merge unchanged. It reads the *recording's*
 touch its calibration; only its constant moved, from `flip::TORQUE_X`/`TORQUE_Y`
 to the consolidated `flip::TORQUE`.
 
+## Where The Merged Tree Stands Against C++
+
+Measured 2026-08-24 on the 423-424 cases all three engines share, one
+`RLGATE=off RLROLL=1.5s RLCPP=1` run for ours+C++ and one `RLGATE=off
+RLROLL=1.5s` run on `ef16d89` for the pre-merge column. The C++ engine is
+unaffected by our source, so it is measured once.
+
+### Per step (the per-tick restore pass)
+
+| engine | car pos UU | car vel UU/s | ball pos UU | ball vel UU/s |
+|---|---|---|---|---|
+| ours pre-merge | 0.0345 | 2.5848 | 0.3514 | 10.5095 |
+| **ours merged** | **0.0335** | **2.4511** | 0.3547 | 10.5277 |
+| C++ RocketSim | 0.0604 | 6.3007 | **0.2347** | 12.4699 |
+| merged vs C++ | -44.6% | **-61.1%** | **+51.2%** | -15.6% |
+
+These are tick-weighted report means over all 423 cases, so they are not the
+same statistic as the `RLCENSUS` suite mean (which is car-velocity only, drops
+the unmeasurable impulse windows, and weights by measured step). They agree
+anyway -- census 2.5953 -> 2.4627 (-5.11%), report 2.5848 -> 2.4511 (-5.2%) --
+which is the cross-check that the two measurements describe the same tree.
+
+**Ball position is the one place C++ beats us, and by a lot (0.2347 vs 0.3547).**
+Ball *velocity* is better on our side over the same steps, so this is not a
+uniformly worse ball: a per-step position error that outruns the velocity error
+means the discrepancy is being applied at a different point within the step, not
+that a force is the wrong size. Note this is unrelated to the documented
+`noBallRot=true` caveat, which only zeroes C++'s ball *rot* rows.
+
+### Free-run divergence (rollout mode, 1.5 s, stride 120)
+
+Car position UU / car velocity UU/s:
+
+| engine | 0.5 s | 1.0 s | 1.5 s | | 0.5 s | 1.0 s | 1.5 s |
+|---|---|---|---|---|---|---|---|
+| ours pre-merge | 16.11 | 69.19 | 168.48 | | 73.48 | 180.40 | 295.17 |
+| **ours merged** | **15.47** | **67.92** | **166.69** | | **71.15** | **178.29** | 296.27 |
+| C++ RocketSim | 20.75 | 75.05 | 179.10 | | 83.40 | 188.16 | 304.46 |
+| merged vs C++ | -25.4% | -9.5% | -6.9% | | -14.7% | -5.2% | -2.7% |
+| merged vs pre-merge | -3.9% | -1.8% | -1.1% | | -3.2% | -1.2% | +0.4% |
+
+Ball position UU / ball velocity UU/s:
+
+| engine | 0.5 s | 1.0 s | 1.5 s | | 0.5 s | 1.0 s | 1.5 s |
+|---|---|---|---|---|---|---|---|
+| ours pre-merge | 69.23 | 270.51 | 557.07 | | 268.64 | 553.93 | 781.43 |
+| **ours merged** | **67.87** | **267.80** | 558.02 | | **265.43** | 556.95 | 784.87 |
+| C++ RocketSim | 69.59 | 271.89 | 564.98 | | 274.43 | 564.29 | 783.99 |
+| merged vs C++ | -2.5% | -1.5% | -1.2% | | -3.3% | -1.3% | +0.1% |
+
+This is [[rollout-divergence-is-saturation]] measured across three engines at
+once, and it is the clearest statement of it yet. The advantage decays
+monotonically with horizon in every single row: car velocity is 14.7% better
+than C++ at 0.5 s, 5.2% at 1.0 s, 2.7% at 1.5 s; ball velocity is 3.3%, 1.3%,
+then +0.1% -- i.e. gone. Against our own pre-merge tree the same thing happens
+faster, and three of the eight 1.5 s cells have already crossed into being
+slightly *worse* (+0.4% car vel, +0.2% ball pos, +0.4% ball vel) while their
+0.5 s cells are all clearly better.
+
+The reason is that a free rollout stops measuring the sim and starts measuring
+Lyapunov divergence: past about a second the trajectories have decorrelated and
+every engine converges on the same error, so the number reports how chaotic the
+scenario is, not how good the physics is. **Only the per-step pass and the 0.5 s
+horizon can score a change.** Do not quote a 1.5 s rollout as evidence for or
+against anything.
+
 ## The Accuracy Bar
 
 A case **passes** when no single simulated step diverges from the recording by
