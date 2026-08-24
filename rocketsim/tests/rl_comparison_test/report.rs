@@ -79,6 +79,20 @@ impl EntityReport {
         &mut self.fields[field_index(f)]
     }
 
+    /// How many steps this entity actually contributed. Every field is filed on
+    /// the same steps, so position speaks for all of them.
+    pub fn measured_steps(&self) -> u64 {
+        self.field(Field::Pos).overall.run.count
+    }
+
+    /// Drop every sample, leaving the entity reporting nothing. Used when a
+    /// recording's ground truth for it turns out to be unusable as a whole, so
+    /// that what survives cannot masquerade as a measurement.
+    pub fn clear_samples(&mut self) {
+        let cap = self.fields.len();
+        self.fields = (0..cap).map(|_| FieldReport::new(0)).collect();
+    }
+
     pub fn merge(&mut self, other: EntityReport) {
         for (mine, theirs) in self.fields.iter_mut().zip(other.fields.into_iter()) {
             mine.merge(theirs);
@@ -106,6 +120,19 @@ pub struct Report {
     /// silently dropped: this number is how much of the ball's ground truth the
     /// logger cannot support.
     pub ball_steps_voided: u64,
+
+    /// Steps whose ball rows were dropped because the *recorded* ball position
+    /// sits inside the arena collision mesh deeper than one step of travel can
+    /// account for — see [`super::runner::ball_embedded_in_mesh`]. Reported
+    /// apart from `ball_steps_voided` because the cause is different: that one
+    /// is a logger channel disagreeing with itself, this one is ground truth
+    /// disagreeing with Rocket League's own arena.
+    pub ball_steps_embedded: u64,
+
+    /// Set when the ball spent so much of the recording inside the arena mesh
+    /// that its whole channel was discarded — see
+    /// [`super::runner::reject_embedded_ball_ground_truth`].
+    pub ball_ground_truth_rejected: bool,
     pub num_cars: usize,
     /// Cars first (0..num_cars), then the ball at index num_cars.
     pub entities: Vec<EntityReport>,
@@ -125,6 +152,8 @@ impl Report {
             ticks_voided: 0,
             impulse_steps_skipped: 0,
             ball_steps_voided: 0,
+            ball_steps_embedded: 0,
+            ball_ground_truth_rejected: false,
             num_cars,
             entities,
         }
@@ -152,6 +181,8 @@ impl Report {
         self.ticks_voided += other.ticks_voided;
         self.impulse_steps_skipped += other.impulse_steps_skipped;
         self.ball_steps_voided += other.ball_steps_voided;
+        self.ball_steps_embedded += other.ball_steps_embedded;
+        self.ball_ground_truth_rejected |= other.ball_ground_truth_rejected;
         for (mine, theirs) in self.entities.iter_mut().zip(other.entities.into_iter()) {
             mine.merge(theirs);
         }
@@ -195,11 +226,22 @@ pub fn evaluate(report: &mut Report, cfg: &HarnessConfig) -> (GateOutcome, Vec<S
     } else {
         String::new()
     };
-    let ball_note = if report.ball_steps_voided > 0 {
+    let mut ball_note = if report.ball_steps_voided > 0 {
         format!(" ball_steps_voided={}", report.ball_steps_voided)
     } else {
         String::new()
     };
+    if report.ball_steps_embedded > 0 {
+        ball_note.push_str(&format!(
+            " ball_steps_embedded={}{}",
+            report.ball_steps_embedded,
+            if report.ball_ground_truth_rejected {
+                " ball_REJECTED"
+            } else {
+                ""
+            },
+        ));
+    }
     lines.push(format!(
         "==== RLPR {} | ticks={} stride={} gate={} percentile=p{:0>2}{}{} ====",
         report.name,
@@ -219,6 +261,19 @@ pub fn evaluate(report: &mut Report, cfg: &HarnessConfig) -> (GateOutcome, Vec<S
         outcome.violations.push(format!(
             "no ticks measured ({} voided) - nothing was verified",
             report.ticks_voided,
+        ));
+    }
+
+    // A recording whose ball ground truth was thrown out proves nothing about the
+    // ball, and must not pass on the strength of having measured nothing -- the
+    // same rule the tick guard above applies. This is distinct from the many
+    // car-focused recordings that legitimately carry no ball: those discard
+    // nothing, because the ball sits at the sentinel throughout.
+    if report.ball_ground_truth_rejected {
+        outcome.passed = false;
+        outcome.violations.push(format!(
+            "ball ground truth rejected: embedded in the arena mesh on {} steps              - the ball was not verified",
+            report.ball_steps_embedded,
         ));
     }
 

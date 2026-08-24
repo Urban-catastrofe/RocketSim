@@ -130,6 +130,14 @@ fn test_recording(recording: &Recording) {
             ballcensus::truth_audit(recording);
             return;
         }
+        Ok("8") => {
+            ballcensus::mesh_sweep(recording);
+            return;
+        }
+        Ok("9") => {
+            ballcensus::corner_profile(recording);
+            return;
+        }
         Ok(_) => {
             ballcensus::analyze(recording);
             return;

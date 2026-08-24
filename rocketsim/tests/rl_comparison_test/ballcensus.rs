@@ -914,3 +914,209 @@ pub fn analyze(recording: &Recording) {
         );
     }
 }
+
+/// `RLBALL=8`: sweep every recorded ball position for collision-mesh
+/// penetration, to settle whether our arena mesh is where Rocket League's was.
+///
+/// The bound is the same one that caps the push-out in
+/// `convert_contact_special`. Bullet's narrowphase only produces points within
+/// `CONTACT_BREAKING_THRESHOLD` of a surface, so inside one step the ball can
+/// only have driven into a wall as far as it travelled: `|v| * dt`. A *recorded*
+/// position that puts the ball deeper than that cannot have come from a step
+/// against this mesh -- Rocket League would have pushed it out -- so the excess
+/// is either a mesh we placed wrong or ground truth we should not be grading
+/// against. Which one is decided by whether the excess clusters at a location
+/// or scatters across the arena.
+///
+/// Reported against the *recording's* own position, with no reliance on the
+/// nominal arena planes: `hitbox_dist`-style analytic geometry is exactly what
+/// is under suspicion here, so the only geometry trusted is the mesh itself,
+/// through the contact points the narrowphase actually generated.
+pub fn mesh_sweep(recording: &Recording) {
+    /// Report a step once it is this many UU deeper than one step of travel
+    /// explains. Below this it is ordinary narrowphase slack.
+    const EXCESS_REPORT: f32 = 1.0;
+
+    let num_cars = recording.info.num_cars as usize;
+    let stride = recording.stride;
+    let dt = TICK_TIME * stride as f32;
+    let (mut arena, car_idcs) = make_arena(num_cars);
+    let mut controls_buf: Vec<CarControls> = vec![CarControls::DEFAULT; num_cars];
+
+    let mut n_steps = 0u64;
+    let mut n_contact = 0u64;
+    let mut n_excess = 0u64;
+    let mut worst = 0.0f32;
+    let mut worst_pos = Vec3A::ZERO;
+    let mut worst_tick = 0usize;
+    // Deepest the *recording* ever drives the ball past the nominal corner
+    // chamfer, over every step in the corner region whether the sim saw a
+    // contact or not. This is the control for the whole sweep: if our chamfer
+    // were mislocated, balls all over the suite would sit past it, not just the
+    // handful the contact-based test happens to catch.
+    let mut worst_corner = f32::INFINITY;
+    let mut worst_corner_pos = Vec3A::ZERO;
+    let mut n_corner = 0u64;
+
+    let last = recording.ticks.len().saturating_sub(stride + 1);
+    for i in (0..=last).step_by(stride) {
+        let discontinuous = has_discontinuity(recording, i, stride);
+        let from_tick = &recording.ticks[i];
+        let to_tick = &recording.ticks[i + stride];
+        for (j, car_record) in to_tick.car_records.iter().enumerate() {
+            controls_buf[j] = car_record.prev_controls.into();
+        }
+        set_state_to_record_tick(
+            &mut arena,
+            &car_idcs,
+            from_tick,
+            i.checked_sub(stride).map(|i| &recording.ticks[i]),
+            &controls_buf,
+        );
+
+        // Step unconditionally: `set_state_to_record_tick` does not restore
+        // Bullet's warm-started manifolds, so skipping a step changes the next.
+        let v_before = arena.get_ball_state().phys.vel;
+        let mut pts: Vec<(Vec3A, Vec3A)> = Vec::new();
+        for ev in arena.step_tick() {
+            if let ArenaEvent::BallHitWorld(e) = ev {
+                pts.push((e.contact_point, e.contact_normal));
+            }
+        }
+
+        let from = &from_tick.ball_record;
+        if discontinuous || is_sentinel(from) || is_sentinel(&to_tick.ball_record) {
+            continue;
+        }
+        n_steps += 1;
+
+        let p = Vec3A::from(from.pos);
+        // Corner region: near enough to the chamfer that it is the governing
+        // surface. Purely the recording's own position -- no simulation.
+        if p.x.abs() + p.y.abs() > 7000.0 {
+            n_corner += 1;
+            let gap = (CORNER_C - (p.x.abs() + p.y.abs())) / SQRT2 - BALL_RADIUS;
+            if gap < worst_corner {
+                worst_corner = gap;
+                worst_corner_pos = p;
+            }
+        }
+
+        if pts.is_empty() {
+            continue;
+        }
+        n_contact += 1;
+        // The deepest point is the closest one to the ball centre: a contact on
+        // the surface sits one radius out, and penetration pulls it inward.
+        let (deep_pt, deep_nrm) = pts
+            .iter()
+            .copied()
+            .min_by(|a, b| (a.0 - p).length().partial_cmp(&(b.0 - p).length()).unwrap())
+            .unwrap();
+        let penetration = BALL_RADIUS - (deep_pt - p).length();
+        // Mirror the runner's bound: only motion *into* the surface can create
+        // penetration, so sliding fast along a wall earns no allowance.
+        let travel = (-v_before.dot(deep_nrm)).max(0.0) * dt;
+        let excess = penetration - travel;
+        if excess <= EXCESS_REPORT {
+            continue;
+        }
+        n_excess += 1;
+        if excess > worst {
+            worst = excess;
+            worst_pos = p;
+            worst_tick = i;
+        }
+        println!(
+            "BALLMESH {} t{i} excess={excess:.1} pen={penetration:.1} travel={travel:.1} class={} np={} nrm=({:.3},{:.3},{:.3}) pos=({:.0},{:.0},{:.0})",
+            recording.name,
+            normal_class(deep_nrm),
+            pts.len(),
+            deep_nrm.x,
+            deep_nrm.y,
+            deep_nrm.z,
+            p.x,
+            p.y,
+            p.z,
+        );
+    }
+
+    println!(
+        "BALLMESHSUM {} steps={n_steps} contact={n_contact} excess={n_excess} worst={worst:.1}@t{worst_tick} worstpos=({:.0},{:.0},{:.0}) ncorner={n_corner} worstcorner={:.1} cornerpos=({:.0},{:.0},{:.0})",
+        recording.name,
+        worst_pos.x,
+        worst_pos.y,
+        worst_pos.z,
+        if worst_corner.is_finite() {
+            worst_corner
+        } else {
+            0.0
+        },
+        worst_corner_pos.x,
+        worst_corner_pos.y,
+        worst_corner_pos.z,
+    );
+}
+
+/// `RLBALL=9`: map where our arena collision mesh actually puts the soccar
+/// corner, as a function of height.
+///
+/// The harness has carried a `CORNER_C` constant describing the corner as a
+/// flat 45 degree chamfer at `|x| + |y| = 8064`, and the sweep in
+/// [`mesh_sweep`] contradicts it: `ball_corner_trap_slow` rests the ball at
+/// `|x| + |y| = 8760` with the sim generating ordinary contacts and no excess
+/// penetration, which a chamfer at 8064 would make impossible. Rather than
+/// argue from recordings, this walks the ball out along the diagonal at a set
+/// of heights and reports the first `|x| + |y|` at which the mesh answers.
+/// Runs once, on whichever recording is named by `RLBALL_REC` (default the
+/// first case alphabetically), because the geometry does not depend on it.
+pub fn corner_profile(recording: &Recording) {
+    let want = std::env::var("RLBALL_REC").unwrap_or_else(|_| "ball_bounce_ground".to_string());
+    if recording.name != want {
+        return;
+    }
+    let (mut arena, _car_idcs) = make_arena(0);
+
+    for &z in &[
+        93.15f32, 120.0, 150.0, 200.0, 300.0, 400.0, 550.0, 800.0, 1200.0, 1800.0,
+    ] {
+        let mut first_contact = f32::NAN;
+        let mut deepest = 0.0f32;
+        // Walk outward along x = y. `s` is |x| + |y|, so the perpendicular step
+        // is s / sqrt(2).
+        let mut s = 7000.0f32;
+        while s <= 9600.0 {
+            let mut bs = *arena.get_ball_state();
+            bs.phys.pos = Vec3A::new(s / 2.0, s / 2.0, z);
+            bs.phys.vel = Vec3A::ZERO;
+            bs.phys.ang_vel = Vec3A::ZERO;
+            arena.set_ball_state(bs);
+
+            let mut pen = f32::NEG_INFINITY;
+            for ev in arena.step_tick() {
+                if let ArenaEvent::BallHitWorld(e) = ev {
+                    let d =
+                        BALL_RADIUS - (e.contact_point - Vec3A::new(s / 2.0, s / 2.0, z)).length();
+                    if d > pen {
+                        pen = d;
+                    }
+                }
+            }
+            if pen > f32::NEG_INFINITY {
+                if first_contact.is_nan() {
+                    first_contact = s;
+                }
+                if pen > deepest {
+                    deepest = pen;
+                }
+            }
+            s += 20.0;
+        }
+        println!(
+            "BALLCORNER z={z:.0} first_contact_s={first_contact:.0} implied_plane_s={:.0} deepest_pen={deepest:.1}",
+            // If the wall were a plane at |x|+|y| = C, contact starts one radius
+            // short of it along the perpendicular: C = s + R * sqrt(2).
+            first_contact + BALL_RADIUS * SQRT2,
+        );
+    }
+}

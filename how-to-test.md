@@ -1762,7 +1762,7 @@ order/quantization, often acceptable.
 | `RLCENSUS` | `1` error-mass census by cause; `2` also lists each bucket's worst steps; `3` sub-bands by speed + handbrake state; `4` by `friction_curve_input`; `5` by suspension compression; `6` by compression x compression rate; `7` 1-UU compression bands with a quiet suspension | off |
 | `RLCTRLOFF` | shift which tick the census reads controls from (`-1`/`0`/`+1`), to re-verify control alignment | `0` |
 | `RLLATDUMP` | `1` to emit one `LATROW` per flat-floor zero-steer step: RL's own lateral friction impulse and the sim's, with per-wheel slip ratio and side impulse. See `latdump.rs` | off |
-| `RLBALL` | `1` census of ball velocity error by contact cause; `2` liveness survey of the ball's world-contact fields plus a position-vs-velocity audit of the recording itself; `3` per-step `BALLDUMP`; `4` `BALLBOUNCE`, judging a bounce by its outcome across a free rollout with tick alignment; `5` every individual ball-world contact point for `RLBALL_REC` over `RLBALL_T=lo:hi`; `6` `BALLRESP`/`BALLNRM`, the sim's contact response against RL's banded by the ball's gap to the surface; `7` `BALLTRUTH`, per-step ground-truth audit of what survives the harness's existing voids. See `ballcensus.rs` | off |
+| `RLBALL` | `1` census of ball velocity error by contact cause; `2` liveness survey of the ball's world-contact fields plus a position-vs-velocity audit of the recording itself; `3` per-step `BALLDUMP`; `4` `BALLBOUNCE`, judging a bounce by its outcome across a free rollout with tick alignment; `5` every individual ball-world contact point for `RLBALL_REC` over `RLBALL_T=lo:hi`; `6` `BALLRESP`/`BALLNRM`, the sim's contact response against RL's banded by the ball's gap to the surface; `7` `BALLTRUTH`, per-step ground-truth audit of what survives the harness's existing voids; `8` `BALLMESH`/`BALLMESHSUM`, sweep every recorded ball position for arena-mesh penetration; `9` `BALLCORNER`, walk the ball out along `x = y` to map where the corner mesh actually is. See `ballcensus.rs` | off |
 | `RLFLIP` | `1` to emit one `FLIPZ` row per isolated airborne flip step: RL's own z-damp decision on the closed vertical axis, with `flip_time`, tumble, `up.z` and both boost orderings. Filter to `0.35*|vzF| > 20` before reading. See `flipdamp.rs` | off |
 | `RLCENSUS` (`10`) | band every bucket by the recorded jump/flip state and `flip_time` phase | off |
 | `RLCARC` (`4`) | survey car-identity transpositions after an array collapse (`CARCSWAP`). Zero suite-wide; kept as a ruled-out hypothesis | off |
@@ -2263,10 +2263,78 @@ set unchanged.
 **What it costs.** `ball_corner_exit_high` and `ball_corner_exit_low` still go
 0.96 -> 4.09 and 1.36 -> 3.85. That is the cap working -- 12x better than
 uncapped -- but any recovery mechanism must move a ball that starts embedded.
-Whether the recording is wrong or our corner mesh is is still open: at
-`(3593, 4493, 316)` the ball centre is 22 UU past the nominal chamfer plane and
-the sim's own contact points sit 16 UU from its centre, which is not a state a
-free-running sim could reach. Worth settling before trusting either recording.
+Settled below: the recordings are wrong, not the mesh.
+
+#### The arena mesh is right; two recordings spawn the ball inside it (RLBALL=8)
+
+`RLBALL=8` steps every recorded ball position and measures how far inside the
+collision mesh it sits, against the depth the step's own motion into that
+surface can produce. Over **158 406 steps in 439 recordings the mesh is never
+violated**, on any flat face, corner or goal feature -- with three exceptions,
+and the shape of those exceptions is what decides the question:
+
+| recording | ball steps | violating | worst depth |
+|---|---|---|---|
+| `ball_corner_exit_low` | 239 | **239 (100%)** | 76.0 UU |
+| `ball_corner_exit_high` | 239 | **212 (89%)** | 79.9 UU |
+| goal frame + `2v2_match` (5 recordings) | 4 838 | 20 (<3%) | 13.6 UU |
+
+The two `corner_exit` recordings put the ball 74-80 UU inside the corner wall at
+tick 0 and leave it there for the whole recording, falling under gravity, while
+Rocket League applies no contact force at all. Every other recording that visits
+the corners -- `ball_curve_into_corner_side`, `ball_corner_xy_*`,
+`ball_corner_slide_*`, four `2v2` replays -- respects the mesh exactly, resting
+2 UU clear of it and penetrating no more than one step of approach when it
+bounces. A mislocated corner would show up in all of them, so the mesh is right
+and those two recordings are not.
+
+**`CORNER_C = 8064` was guesswork and is now measured.** `RLBALL=9` walks the
+ball out along `x = y` and reads off where the mesh answers: an implied plane of
+7849 (z=1800) through 8009 (z=300..1200). Off the diagonal the corner is roomier
+still -- `ball_corner_trap_slow` rests the ball at `|x| + |y| = 8760` against
+ordinary contacts -- so the corner is a fillet and no plane describes it. The
+constant is now 7849, the tightest value the probe found, which keeps it at or
+inside the mesh everywhere and preserves the invariant the nominal planes are
+documented to have. **An earlier claim of mine that our nominal plane and our
+mesh disagreed by >100 UU was an arithmetic error** -- comparing the ball
+centre's distance to the plane against how far the ball's far side lay past it,
+two different quantities describing the same geometry. They agree to 0.05 UU.
+
+**Depth alone cannot make the call, and that matters.** A ball genuinely
+bouncing out of the goal-post base reports up to 13.6 UU of unexplained depth,
+because the deepest of 47 coincident manifold points overstates the real
+overlap. Those steps are exactly where the ball's remaining error lives, so a
+depth threshold tuned to catch `corner_exit` would hide the very thing we are
+hunting. What separates them is not how deep but how long: a real wedge lasts
+two or three ticks. So the rejection is made per *recording* -- ball ground
+truth is discarded wholesale when over 25% of a recording's ball steps are
+embedded, and the split is 89%/100% against at most 3%, with the same two
+recordings picked out anywhere from 5% to 85%.
+
+A recording whose ball channel is discarded now **fails loudly** rather than
+passing on the strength of having measured nothing, matching the rule the
+tick-count guard already applies. `ball_steps_embedded=N ball_REJECTED` appears
+in the case header, and `RLKEEPDUP=1` bypasses it.
+
+Scripted, all 244 recordings, with no hand-exclusion of the corner pair:
+
+| | before | after |
+|---|---|---|
+| per-step ball pos rms | 0.7552 UU | **0.6640** (-12.1%) |
+| per-step ball vel rms | 85.7477 uu/s | **84.8172** (-1.09%) |
+| per-step ball ang_vel rms | 0.1998 rad/s | **0.1904** (-4.71%) |
+
+The number that matters is not the headline but that it now **agrees with the
+hand-excluded figure** (0.6640 vs 0.6668): the manual "excluding the corner
+pair" caveat that every ball measurement has carried is gone. Every other
+recording is bit-identical, gate pass set unchanged at 45.
+
+**The harness is deterministic; earlier pass counts were a grep artifact.** Two
+full runs of the same binary give byte-identical pass sets. The "33 passes,
+thread-count dependent" I reported earlier was wrong: under `--nocapture` at
+`--test-threads=6`, a test's `... ok` line gets concatenated with another
+test's interleaved output, so an anchored grep silently drops it. Count the pass
+set from a run **without** `--nocapture`.
 
 ### The Flip Z-Damp Was Firing On Almost Everything (-13.4%, RLFLIP)
 

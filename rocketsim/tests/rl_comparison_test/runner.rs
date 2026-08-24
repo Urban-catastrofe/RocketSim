@@ -73,8 +73,18 @@ pub(crate) const BALL_RADIUS: f32 = 91.25;
 pub(crate) const ARENA_X: f32 = 4096.0;
 pub(crate) const ARENA_Y: f32 = 5120.0;
 pub(crate) const ARENA_Z: f32 = 2048.0;
-/// The corner chamfer plane, `|x| + |y| = CORNER_C`.
-pub(crate) const CORNER_C: f32 = 8064.0;
+/// Conservative diagonal bound on the soccar corner, `|x| + |y| = CORNER_C`.
+///
+/// Not a chamfer: `RLBALL=9` walks the ball out along `x = y` and finds the mesh
+/// answering at an implied plane of 7849 (z=1800) to 8009 (z=300..1200), and off
+/// the diagonal the corner is roomier still -- `ball_corner_trap_slow` rests the
+/// ball at `|x| + |y| = 8760` against ordinary contacts. The corner is a fillet
+/// and no single plane describes it. This is set to the *tightest* value the
+/// probe found so the plane stays at or inside the mesh everywhere, which is the
+/// direction that keeps [`ball_gap_to_surface`] from ever calling a ball far
+/// from a surface that is actually beside one. An earlier 8064 was guesswork and
+/// sat outside the mesh, breaking that invariant.
+pub(crate) const CORNER_C: f32 = 7849.0;
 pub(crate) const SQRT2: f32 = std::f32::consts::SQRT_2;
 /// Octane hitbox half-extents and centre offset, as in `census.rs`. Every car in
 /// the suite is an Octane.
@@ -112,6 +122,87 @@ fn ball_gap_to_surface(p: glam::Vec3A) -> f32 {
     ]
     .into_iter()
     .fold(f32::INFINITY, f32::min)
+}
+
+/// Slack on the embedding test below, in UU. Bullet's narrowphase only creates
+/// points within `CONTACT_BREAKING_THRESHOLD` (0.02 BT = 1 UU) of a surface, so
+/// this is the depth a step can produce over and above its own approach.
+const BALL_EMBED_SLACK: f32 = 1.0;
+
+/// Fraction of a recording's ball steps that must be embedded in the arena mesh
+/// before its ball ground truth is thrown out wholesale.
+///
+/// Depth alone cannot make this call. A ball genuinely bouncing out of the
+/// goal-post base reports up to 13.6 UU of depth the step cannot explain,
+/// because the deepest of 47 coincident points on that manifold overstates the
+/// real overlap -- and those steps are exactly where the ball's remaining error
+/// lives, so hiding them would be hiding the problem. What separates them is not
+/// how deep but how long: a real wedge lasts two or three ticks, whereas
+/// `ball_corner_exit_high` and `ball_corner_exit_low` spawn the ball 74-80 UU
+/// inside the corner wall at tick 0 and leave it there while Rocket League
+/// applies no contact force at all.
+///
+/// Measured over the suite the split is not close: those two recordings violate
+/// on 89% and 100% of their ball steps, and every other recording that violates
+/// at all does so on at most 3%. Anything from roughly 5% to 85% picks out the
+/// same two.
+const BALL_EMBED_RECORDING_FRACTION: f64 = 0.25;
+
+/// True when the *recorded* ball position sits inside the arena collision mesh
+/// deeper than the step's own motion into that surface can account for.
+///
+/// The bound is the approach along the contact normal, not the total distance
+/// travelled. Sliding fast *along* a wall does not entitle the ball to be inside
+/// it: only motion into the surface can create penetration, so the depth a step
+/// can produce is `max(0, -v . n) * dt` plus the narrowphase's own threshold.
+/// Using total speed instead leaves exactly the wrong steps behind —
+/// `ball_corner_exit_low` kept precisely one of 239, the single worst, because
+/// the ball was moving quickly across the corner while buried 70 UU inside it.
+///
+/// A recorded state deeper than this was not produced by a step against this
+/// mesh — Rocket League would have pushed it out and did not. That makes it the
+/// same bound the ball's positional push-out is capped at in
+/// `convert_contact_special`: a state the push-out could not have created is one
+/// it must not be asked to undo, and grading against it measures a disagreement
+/// about where the wall is rather than any physics.
+///
+/// The reference is the mesh itself, through the contact points the narrowphase
+/// generated — not the nominal planes above, which describe the corner far too
+/// crudely to judge this (see [`CORNER_C`]).
+///
+/// `RLBALL=8` sweeps the suite. Violations land in three recordings only:
+/// `ball_corner_exit_high` and `ball_corner_exit_low` spawn the ball 74-80 UU
+/// inside the corner wall at tick 0 and leave it there for the whole recording
+/// while Rocket League applies no contact force at all, and
+/// `ball_goal_post_base_right` has two transient steps against a 47-point
+/// manifold. The other 436 recordings never violate the mesh, corner-heavy ones
+/// included — which is what says the mesh is right and those recordings are not.
+fn ball_embedded_in_mesh(deepest_penetration: f32, approach_speed: f32, dt: f32) -> bool {
+    deepest_penetration > approach_speed.max(0.0) * dt + BALL_EMBED_SLACK
+}
+
+/// Throw out a recording's whole ball channel when the ball spends most of the
+/// recording inside the arena mesh -- see [`BALL_EMBED_RECORDING_FRACTION`].
+///
+/// Applied after the shards merge rather than per step, because the test is a
+/// property of the recording and no single step can answer it. Individually
+/// suspicious steps are therefore still measured: on a recording that passes
+/// this test they are real contacts, and dropping them would delete signal.
+pub(crate) fn reject_embedded_ball_ground_truth(report: &mut Report) {
+    if keep_corrupt_steps() || report.ball_steps_embedded == 0 {
+        return;
+    }
+    let ball_index = report.num_cars;
+    let measured = report.entities[ball_index].measured_steps();
+    let total = measured + report.ball_steps_embedded;
+    if total == 0 {
+        return;
+    }
+    if (report.ball_steps_embedded as f64) / (total as f64) < BALL_EMBED_RECORDING_FRACTION {
+        return;
+    }
+    report.entities[ball_index].clear_samples();
+    report.ball_ground_truth_rejected = true;
 }
 
 /// How far the ball's recorded velocity may sit from the velocity implied by its
@@ -715,7 +806,23 @@ fn run_per_tick_shard(recording: &Recording, shard: &[usize]) -> Report {
             i.checked_sub(stride).map(|i| &recording.ticks[i]),
             &controls_buf,
         );
-        arena.step_tick();
+
+        // Deepest the ball is inside the mesh at the pose we just restored, and
+        // how fast it is moving into that surface. Read off the step the shard
+        // takes anyway, so this costs nothing.
+        let ball_pos_before: glam::Vec3A = from_tick.ball_record.pos.into();
+        let ball_vel_before: glam::Vec3A = from_tick.ball_record.lin_vel.into();
+        let mut deepest_penetration = f32::NEG_INFINITY;
+        let mut ball_approach_speed = 0.0f32;
+        for event in arena.step_tick() {
+            if let rocketsim::ArenaEvent::BallHitWorld(hit) = event {
+                let depth = BALL_RADIUS - (hit.contact_point - ball_pos_before).length();
+                if depth > deepest_penetration {
+                    deepest_penetration = depth;
+                    ball_approach_speed = -ball_vel_before.dot(hit.contact_normal);
+                }
+            }
+        }
 
         for (j, &car_idx) in car_idcs.iter().enumerate() {
             let real = &to_tick.car_records[j];
@@ -752,6 +859,13 @@ fn run_per_tick_shard(recording: &Recording, shard: &[usize]) -> Report {
         } else if ball_record_impossible(from_tick, to_tick, stride) {
             report.ball_steps_voided += 1;
         } else {
+            if ball_embedded_in_mesh(
+                deepest_penetration,
+                ball_approach_speed,
+                rocketsim::consts::TICK_TIME * stride as f32,
+            ) {
+                report.ball_steps_embedded += 1;
+            }
             let ball_state: &BallState = arena.get_ball_state();
             let ball_delta = compute_delta(&ball_state.phys, &to_tick.ball_record);
             let ball_ent = &mut report.entities[report.num_cars];
@@ -791,7 +905,9 @@ pub fn run_per_tick(recording: &Recording, cfg: &HarnessConfig) -> Report {
         cfg.threads.clamp(1, starts.len())
     };
     if threads <= 1 {
-        return run_per_tick_shard(recording, &starts);
+        let mut single = run_per_tick_shard(recording, &starts);
+        reject_embedded_ball_ground_truth(&mut single);
+        return single;
     }
 
     let mut merged = Report::new(recording.name.clone(), stride, num_cars, 0);
@@ -805,6 +921,7 @@ pub fn run_per_tick(recording: &Recording, cfg: &HarnessConfig) -> Report {
             merged.merge(handle.join().expect("per-tick shard panicked"));
         }
     });
+    reject_embedded_ball_ground_truth(&mut merged);
     merged
 }
 
