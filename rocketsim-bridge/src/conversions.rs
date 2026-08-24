@@ -96,7 +96,14 @@ pub fn ffi_to_controls(c: &ffi::FfiCarControls) -> rocketsim::CarControls {
 pub fn car_state_to_ffi(s: &rocketsim::CarState) -> ffi::FfiCarState {
     let (has_world_contact, world_contact_normal) = match s.world_contact_normal {
         Some(n) => (true, vec3a_to_ffi(n)),
-        None => (false, ffi::FfiVec { x: 0.0, y: 0.0, z: 0.0 }),
+        None => (
+            false,
+            ffi::FfiVec {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        ),
     };
 
     ffi::FfiCarState {
@@ -112,7 +119,7 @@ pub fn car_state_to_ffi(s: &rocketsim::CarState) -> ffi::FfiCarState {
         has_double_jumped: s.has_double_jumped,
         has_flipped: s.has_flipped,
         flip_rel_torque: vec3a_to_ffi(s.flip_rel_torque),
-        jump_time: s.jump_time,
+        jump_time: s.jump_time(),
         flip_time: s.flip_time,
         is_flipping: s.is_flipping,
         is_jumping: s.is_jumping,
@@ -163,7 +170,7 @@ pub fn ffi_to_car_state(s: &ffi::FfiCarState) -> rocketsim::CarState {
         has_double_jumped: s.has_double_jumped,
         has_flipped: s.has_flipped,
         flip_rel_torque: ffi_to_vec3a(&s.flip_rel_torque),
-        jump_time: s.jump_time,
+        jump_ticks: (s.jump_time * rocketsim::consts::TICK_RATE).round() as u32,
         flip_time: s.flip_time,
         is_flipping: s.is_flipping,
         is_jumping: s.is_jumping,

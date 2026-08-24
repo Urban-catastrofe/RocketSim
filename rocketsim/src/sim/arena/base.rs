@@ -1,6 +1,12 @@
+use std::{any::Any, f32::consts::PI, iter::repeat_n, mem};
+
+use arrayvec::ArrayVec;
+use fastrand::Rng;
+use glam::{Affine3A, EulerRot, Mat3A, Vec3A};
+#[cfg(debug_assertions)]
+use indexmap::IndexMap;
+
 use super::ArenaContactTracker;
-use crate::shared::rsmath;
-use crate::shared::rsmath::VecQuantizeMode;
 use crate::{
     ARENA_COLLISION_SHAPES, ArenaConfig,
     ArenaEvent::{BallHitWorld, CarPickupBoost},
@@ -17,22 +23,17 @@ use crate::{
         },
         dynamics::{
             discrete_dynamics_world::DiscreteDynamicsWorld,
-            rigid_body::{ActivationState, CollisionFlags, RigidBody, RigidBodyConstructionInfo},
+            rigid_body::{CollisionFlags, RigidBody, RigidBodyConstructionInfo},
         },
     },
     consts::{self, BT_TO_UU, TICK_RATE, TICK_TIME, UU_TO_BT},
     make_tile_shapes,
+    shared::quantize,
     sim::{
-        ArenaEvent, Ball, BallState, BoostPad, CarHitBallEvent, CarHitCarEvent, CarHitWorldEvent,
-        DemoMode, UserInfoTypes, arena::ArenaEventList,
+        ArenaEvent, Ball, BallHitConfig, BallState, BoostPad, CarHitBallEvent, CarHitCarEvent,
+        CarHitWorldEvent, DemoMode, UserInfoTypes, arena::ArenaEventList,
     },
 };
-use arrayvec::ArrayVec;
-use fastrand::Rng;
-use glam::{Affine3A, EulerRot, Mat3A, Vec3A};
-#[cfg(debug_assertions)]
-use indexmap::IndexMap;
-use std::{any::Any, f32::consts::PI, iter::repeat_n, mem};
 
 pub trait Vis: Send + Sync + Any {
     fn update(&mut self, arena_state: &ArenaState, dt: f32);
@@ -61,15 +62,16 @@ impl Arena {
     }
 
     pub fn new_with_config(config: ArenaConfig) -> Self {
-        let (cell_size_multiplier, initial_handle_size) = match config.mem_weight_mode {
-            ArenaMemWeightMode::Light => (3.0, 1),
-            ArenaMemWeightMode::Heavy => (1.0, 8),
+        let (cell_size, initial_handle_size) = match config.mem_weight_mode {
+            ArenaMemWeightMode::Light => ((config.max_pos - config.min_pos).max_element(), 1),
+            ArenaMemWeightMode::Balanced => (config.max_aabb_len * 3.0, 1),
+            ArenaMemWeightMode::Heavy => (config.max_aabb_len, 8),
         };
 
         let broadphase = GridBroadphase::new(
             config.min_pos * UU_TO_BT,
             config.max_pos * UU_TO_BT,
-            config.max_aabb_len * UU_TO_BT * cell_size_multiplier,
+            cell_size * UU_TO_BT,
             initial_handle_size,
         );
 
@@ -469,6 +471,7 @@ impl Arena {
     /// Steps the arena for 1 tick, returning the events produced during that tick
     pub fn step_tick(&mut self) -> &[ArenaEvent] {
         self.events.clear();
+        self.contact_tracker.clear_solved_contacts();
 
         // NOTE: This needs to be called manually
         // TODO: Make it not need to be called manually
@@ -476,54 +479,19 @@ impl Arena {
 
         // Limit velocities, then quantize physics values
         {
-            use consts::{ball, car, quantize};
-
-            fn quantize_rb(rb: &mut RigidBody) {
-                let new_pos = rsmath::quantize_vec_ue3(
-                    rb.get_world_pos() * BT_TO_UU,
-                    quantize::POS_SCALE,
-                    VecQuantizeMode::Position,
-                ) * UU_TO_BT;
-                let new_vel = rsmath::quantize_vec_ue3(
-                    rb.lin_vel * BT_TO_UU,
-                    quantize::VEL_SCALE,
-                    VecQuantizeMode::Velocity,
-                ) * UU_TO_BT;
-                let new_ang_vel = rsmath::quantize_vec_ue3(
-                    rb.ang_vel * BT_TO_UU,
-                    quantize::ANG_VEL_SCALE,
-                    VecQuantizeMode::Velocity,
-                ) * UU_TO_BT;
-
-                rb.set_world_pos(new_pos);
-                rb.set_lin_vel(new_vel);
-                rb.set_ang_vel(new_ang_vel);
-            }
+            use consts::{ball, car};
 
             for car_idx in 0..self.cars.len() {
                 let car_rb = &mut self.bullet_world.bodies_mut()[self.cars[car_idx].rigid_body_idx];
                 car_rb.limit_vels(car::MAX_SPEED * UU_TO_BT, car::MAX_ANG_SPEED);
-                quantize_rb(car_rb);
+                quantize::quantize(car_rb);
             }
             let ball_rb = &mut self.bullet_world.bodies_mut()[self.ball.rigid_body_idx];
             ball_rb.limit_vels(
                 self.config.mutators.ball_max_speed * UU_TO_BT,
                 ball::MAX_ANG_SPEED,
             );
-            quantize_rb(ball_rb);
-        }
-
-        // Update ball activation
-        {
-            let ball_rb = &mut self.bullet_world.bodies_mut()[self.ball.rigid_body_idx];
-            let should_sleep =
-                ball_rb.lin_vel.length_squared() == 0.0 && ball_rb.ang_vel.length_squared() == 0.0;
-
-            ball_rb.set_activation_state(if should_sleep {
-                ActivationState::Sleeping
-            } else {
-                ActivationState::Active
-            });
+            quantize::quantize(ball_rb);
         }
 
         for car in &mut self.cars {
@@ -538,7 +506,6 @@ impl Arena {
         self.ball.pre_tick_update(
             &mut self.bullet_world.bodies_mut()[self.ball.rigid_body_idx],
             self.config.game_mode,
-            &self.config.mutators,
         );
 
         self.bullet_world
@@ -569,7 +536,10 @@ impl Arena {
                         );
                     }
                     UserInfoTypes::Car => {
-                        let (pa, pb) = (user_pointer_a.min(user_pointer_b), user_pointer_a.max(user_pointer_b));
+                        let (pa, pb) = (
+                            user_pointer_a.min(user_pointer_b),
+                            user_pointer_a.max(user_pointer_b),
+                        );
                         if !processed_car_car_pairs.contains(&(pa, pb)) {
                             processed_car_car_pairs.push((pa, pb));
                             self.on_car_car_collision(
@@ -654,6 +624,15 @@ impl Arena {
         &self.config.mutators
     }
 
+    #[inline]
+    pub const fn ball_hit_config(&self) -> &BallHitConfig {
+        &self.ball.hit_config
+    }
+
+    pub fn set_ball_hit_config(&mut self, config: BallHitConfig) {
+        self.ball.hit_config = config;
+    }
+
     pub fn set_ball_state(&mut self, ball_state: BallState) {
         self.ball.set_state(
             &mut self.bullet_world.bodies_mut()[self.ball.rigid_body_idx],
@@ -691,6 +670,22 @@ impl Arena {
 
     pub fn get_car_controls(&self, car_idx: usize) -> &CarControls {
         &self.cars[car_idx].state.controls
+    }
+
+    /// Debug access: per-wheel `(in_contact, suspension_length, suspension_rel_vel)`.
+    pub fn get_car_wheel_debug(&self, car_idx: usize) -> [(bool, f32, f32); 4] {
+        let mut out = [(false, 0.0f32, 0.0f32); 4];
+        for (w, o) in self.cars[car_idx]
+            .bullet_vehicle
+            .wheels
+            .iter()
+            .zip(out.iter_mut())
+        {
+            if let Some(ri) = &w.raycast_info {
+                *o = (true, ri.suspension_length, ri.suspension_relative_vel);
+            }
+        }
+        out
     }
 
     pub fn get_car_info_and_state(&self, car_idx: usize) -> (&CarInfo, &CarState) {
@@ -834,6 +829,12 @@ impl Arena {
     /// Returns the events generated during the last stepped tick
     pub fn get_last_step_events(&self) -> &[ArenaEvent] {
         self.events.events()
+    }
+
+    /// Returns solved car-ball contacts from the last stepped tick.
+    #[must_use]
+    pub fn get_last_step_car_ball_contacts(&self) -> &[crate::CarBallContactInfo] {
+        self.contact_tracker.solved_car_ball_contacts()
     }
 
     #[must_use]
@@ -1106,7 +1107,11 @@ impl Arena {
 
         // Pitch: project out the right component.
         let rc = dir_to_other.dot(right);
-        let rc = if rc >= 0.0 { rc * (1.0 / 1.01) } else { rc * 1.01 };
+        let rc = if rc >= 0.0 {
+            rc * (1.0 / 1.01)
+        } else {
+            rc * 1.01
+        };
         let proj_p = (dir_to_other - right * rc).normalize_or_zero();
         let pitch = angle_against_fwd(proj_p, fwd);
         if pitch > max_pitch_rad {
@@ -1115,7 +1120,11 @@ impl Arena {
 
         // Yaw: project out the up component.
         let uc = dir_to_other.dot(up);
-        let uc = if uc >= 0.0 { uc * (1.0 / 1.01) } else { uc * 1.01 };
+        let uc = if uc >= 0.0 {
+            uc * (1.0 / 1.01)
+        } else {
+            uc * 1.01
+        };
         let proj_y = (dir_to_other - up * uc).normalize_or_zero();
         let yaw = angle_against_fwd(proj_y, fwd);
 

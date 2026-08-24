@@ -99,7 +99,13 @@ pub fn analyze(recording: &Recording) {
         for (j, car_record) in to_tick.car_records.iter().enumerate() {
             controls_buf[j] = car_record.prev_controls.into();
         }
-        set_state_to_record_tick(&mut arena, &car_idcs, from_tick, &controls_buf);
+        set_state_to_record_tick(
+            &mut arena,
+            &car_idcs,
+            from_tick,
+            i.checked_sub(stride).map(|i| &recording.ticks[i]),
+            &controls_buf,
+        );
         arena.step_tick();
 
         for (j, &car_idx) in car_idcs.iter().enumerate() {

@@ -65,4 +65,11 @@ impl SolverBody {
             + self.external_force_impulse
             + (self.ang_vel + self.external_torque_impulse).cross(rel_pos)
     }
+
+    pub fn get_vel_in_local_point_with_delta(&self, rel_pos: Vec3A) -> Vec3A {
+        self.lin_vel
+            + self.external_force_impulse
+            + self.delta_lin_vel
+            + (self.ang_vel + self.external_torque_impulse + self.delta_ang_vel).cross(rel_pos)
+    }
 }

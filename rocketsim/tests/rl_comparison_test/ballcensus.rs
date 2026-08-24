@@ -174,7 +174,13 @@ pub fn response_study(recording: &Recording) {
         for (j, car_record) in to_tick.car_records.iter().enumerate() {
             controls_buf[j] = car_record.prev_controls.into();
         }
-        set_state_to_record_tick(&mut arena, &car_idcs, from_tick, &controls_buf);
+        set_state_to_record_tick(
+            &mut arena,
+            &car_idcs,
+            from_tick,
+            i.checked_sub(stride).map(|i| &recording.ticks[i]),
+            &controls_buf,
+        );
 
         let v_before = arena.get_ball_state().phys.vel;
         let mut pts: Vec<(Vec3A, Vec3A)> = Vec::new();
@@ -360,7 +366,13 @@ pub fn point_dump(recording: &Recording) {
         for (j, car_record) in recording.ticks[i + stride].car_records.iter().enumerate() {
             controls_buf[j] = car_record.prev_controls.into();
         }
-        set_state_to_record_tick(&mut arena, &car_idcs, from_tick, &controls_buf);
+        set_state_to_record_tick(
+            &mut arena,
+            &car_idcs,
+            from_tick,
+            i.checked_sub(stride).map(|i| &recording.ticks[i]),
+            &controls_buf,
+        );
 
         let mut pts: Vec<(Vec3A, Vec3A)> = Vec::new();
         for ev in arena.step_tick() {
@@ -492,7 +504,13 @@ pub fn bounce_study(recording: &Recording) {
         for (j, car_record) in recording.ticks[start + 1].car_records.iter().enumerate() {
             controls_buf[j] = car_record.prev_controls.into();
         }
-        set_state_to_record_tick(&mut arena, &car_idcs, start_tick, &controls_buf);
+        set_state_to_record_tick(
+            &mut arena,
+            &car_idcs,
+            start_tick,
+            start.checked_sub(1).map(|i| &recording.ticks[i]),
+            &controls_buf,
+        );
 
         let mut sim_vels: Vec<Vec3A> = Vec::with_capacity(HORIZON + 1);
         let mut n_contacts = 0usize;
@@ -665,7 +683,13 @@ pub fn analyze(recording: &Recording) {
         for (j, car_record) in to_tick.car_records.iter().enumerate() {
             controls_buf[j] = car_record.prev_controls.into();
         }
-        set_state_to_record_tick(&mut arena, &car_idcs, from_tick, &controls_buf);
+        set_state_to_record_tick(
+            &mut arena,
+            &car_idcs,
+            from_tick,
+            i.checked_sub(stride).map(|i| &recording.ticks[i]),
+            &controls_buf,
+        );
 
         // Collect the ball's world contacts this tick from the sim's own event
         // stream: how many there were, and their normals.

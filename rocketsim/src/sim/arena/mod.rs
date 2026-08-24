@@ -6,7 +6,8 @@ mod base;
 mod user_raycast;
 
 pub use arena_config::*;
-pub(crate) use arena_contact_tracker::*;
+pub(crate) use arena_contact_tracker::ArenaContactTracker;
+pub use arena_contact_tracker::CarBallContactInfo;
 pub use arena_events::*;
 pub use arena_state::*;
 pub use base::*;

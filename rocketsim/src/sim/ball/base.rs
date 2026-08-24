@@ -2,8 +2,6 @@ use std::f32::consts::TAU;
 
 use glam::{Affine3A, Vec2, Vec3A};
 
-use crate::bullet::dynamics::rigid_body::Impulse;
-use crate::consts::TICK_TIME;
 use crate::{
     BallState, Car, GameMode, MutatorConfig, Team, TileDamageState, TileStates,
     bullet::{
@@ -16,12 +14,14 @@ use crate::{
         },
         dynamics::{
             discrete_dynamics_world::DiscreteDynamicsWorld,
-            rigid_body::{ActivationState, CollisionFlags, RigidBody, RigidBodyConstructionInfo},
+            rigid_body::{
+                ActivationState, CollisionFlags, Impulse, RigidBody, RigidBodyConstructionInfo,
+            },
         },
-        linear_math::angle::Angle,
     },
-    consts::{BT_TO_UU, UU_TO_BT, dropshot, heatseeker, snowday},
+    consts::{BT_TO_UU, TICK_TIME, UU_TO_BT, dropshot, heatseeker, snowday},
     get_neighbor_indices_1, get_neighbor_indices_2, get_tile_pos,
+    shared::Angle,
     sim::{UserInfoTypes, ball_hit::BallHitConfig, consts},
 };
 
@@ -31,11 +31,7 @@ pub(crate) struct Ball {
     pub ground_stick_applied: bool,
     /// Tunable car-ball extra-hit impulse parameters.
     pub hit_config: BallHitConfig,
-    /// Extra car-ball hit impulse computed during contact that is applied at
-    /// the start of the *next* tick. RL applies the reactive contact impulse
-    /// on the contact tick and the extra "carry" impulse one tick later;
-    /// adding it to `accum_lin_vel` after the solver runs (as before) let
-    /// `clear_accum_forces()` wipe it before it could ever take effect.
+    /// Extra car-ball hit impulse ready to apply at tick finish.
     pub(crate) pending_hit_impulse: Vec3A,
 }
 
@@ -145,12 +141,7 @@ impl Ball {
         self.state = state;
     }
 
-    pub(crate) fn pre_tick_update(
-        &mut self,
-        rb: &mut RigidBody,
-        game_mode: GameMode,
-        _mutator_config: &MutatorConfig, // TODO: Remove
-    ) {
+    pub(crate) fn pre_tick_update(&mut self, rb: &mut RigidBody, game_mode: GameMode) {
         match game_mode {
             GameMode::Heatseeker => {
                 if self.state.hs_info.y_target_dir == 0 {
@@ -249,7 +240,7 @@ impl Ball {
         }
     }
 
-pub(crate) fn finish_physics_tick(
+    pub(crate) fn finish_physics_tick(
         &mut self,
         rb: &mut RigidBody,
         mutator_config: &MutatorConfig,

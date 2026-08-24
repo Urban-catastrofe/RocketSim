@@ -51,9 +51,48 @@ ground truth the calibration loop needs.
 RLRESID=3 cargo test -p rocketsim case_car_ball_soft_touch -- --nocapture --test-threads=1
 ```
 
-> ⚠️ The current recordings are v2 (no hit records). Re-record with the v3
-> logger (`tools/bakkesmod_physics_logger`, `RlprWriter.h` now writes v3). The
-> parser is version-aware — v2 recordings still work.
+Legacy v2 recordings have no hit records and report no events in these modes;
+the parser remains version-aware, so they still work in the regular harness.
+
+## Hit-Episode Analysis (RLRESID=7) — v3 recordings only
+
+`RLRESID=7` measures complete car-ball contact episodes rather than individual
+ticks. It restores two ticks before the first `OnHitBall` event, free-runs
+through the geometrical contact and one delayed frame, then compares the game's
+and sim's total ball velocity change. Episodes without two lead-in frames are
+reported as unmeasurable because their cadence and contact phase cannot be
+reconstructed safely. Each episode also reports the sim's callback ticks,
+extra-impulse ticks, geometric gap, and center-velocity closing speed.
+
+```bash
+RLRESID=7 cargo test -p rocketsim case_car_ball_pop_stationary -- --nocapture --test-threads=1
+```
+
+## Hit-Trigger Audit (RLRESID=11) - v3 recordings only
+
+`RLRESID=11` compares the game's `OnHitBall` labels with the sim's car-ball
+callbacks, actual extra-impulse firings, and post-solver contacts. It reports
+exact-tick precision and recall, plus episode recall with one frame of phase
+tolerance. The latter is the meaningful trigger metric because high-speed
+impacts commonly occur between two recorded frames. The `SOLVED CONTACT` row
+adds the solver normal impulse, pre/post relative normal velocity, manifold
+distance, and RL-vs-sim contact normal/location error. `SWEPT CONTACT` audits
+continuous sphere-vs-car-box gaps at 0/1/2/3 UU thresholds. Set
+`RLTRIGGER_VERBOSE=1` to print each episode's game geometry, sim contact/fire
+ticks, and `(tick, distance, impulse, pre_n, post_n)` solver tuples.
+
+```bash
+RLRESID=11 RLTRIGGER_VERBOSE=1 cargo test -p rocketsim case_car_ball_soft_touch -- --nocapture --test-threads=1
+```
+
+Harness-only overrides support controlled comparisons without changing
+production defaults:
+
+```bash
+RL_HIT_CADENCE=other RLRESID=7 cargo test -p rocketsim case_car_ball_soft_touch -- --nocapture --test-threads=1
+RL_BALL_HIT_SCALE=0 RLRESID=7 cargo test -p rocketsim case_car_ball_soft_touch -- --nocapture --test-threads=1
+RL_CONTACT_STATE_SLACK=1.825 RLGATE=off cargo test -p rocketsim case_car_ball_soft_touch -- --nocapture --test-threads=1
+```
 
 ## The Car-Ball Impulse Subsystem
 
@@ -62,7 +101,8 @@ config-driven module:
 
 - `config.rs` — `BallHitConfig` (all tunables: z_scale, forward_scale, factor
   curve, max_delta_vel) + `HitCadence` enum (`EveryTick` / `EveryOtherTick` /
-  `OncePerEpisode`). The default preserves legacy behavior exactly.
+  `OncePerEpisode`). The production default is `OncePerEpisode`; legacy C++
+  cadence is available as `EveryOtherTick` for calibration.
 - `impulse.rs` — `compute_impulse` (pure) + `can_fire` (cadence check).
 - `state.rs` — `BallHitState` (last impulse tick, last contact tick).
 
@@ -76,19 +116,87 @@ recordings, watch the ball vel p95 move.
 next tick, which the per-tick restore harness wiped before it ever fired — the
 sim's car-ball hits were permanently missing the carried impulse. The default
 cadence is `OncePerEpisode` (one impulse per contact, re-armed after the ball
-separates), which beats the C++'s `EveryOtherTick` on sustained-contact cases
-(`car_ball_soft_touch` 6.5 vs C++ 55.8, dribble 13.8 vs 17.7). Tradeoff: the
-game spreads each hit over **2 ticks** (~35/65 split) in the recording, while
-the sim (and C++) fire once — so per-tick cases dominated by that spread
+separates). The game often spreads a hit over **2 ticks**, and some three-frame
+contact episodes need a second impulse after one skipped frame. For example,
+`EveryOtherTick` reduces complete soft-touch episode error from 51.8 to 0.2
+UU/s. It cannot be enabled globally: in paired 0.5-second rollouts it improves
+soft-touch ball velocity error from 103.10 to 0.14 UU/s but regresses slow push
+from 2.90 to 38.93 UU/s. Contact-normal, car-to-ball centerline, and relative-
+speed gates do not separate those regimes safely. Delaying that cadence also
+produces 60-80 UU/s drift in roof, push, dribble, and pop cases. Per-tick cases dominated by the split
 (`car_ball_backwall_car_ball_approach`, `mech_flip_reset_simple`) score
 slightly worse per-tick even though the *total* impulse matches the game. The
-2-tick split is **not modelable** (verified 2026-08): in the per-tick restore
-harness the 2nd half double-counts (the restore already contains the game's
-recorded 2nd-half velocity), and in the continuous pass it has a negligible
-trajectory effect (a 1000 UU/s impulse delivered in one tick vs split 20/80
-over two ticks converges in velocity immediately, with a ~1.7 UU max position
-offset — measured with a dedicated test). Modeling it would not improve
-accuracy.
+2-tick split is **not safely modelable by a global cadence or delay** (verified
+2026-08): in the per-tick restore harness the 2nd half double-counts (the
+restore already contains the game's recorded 2nd-half velocity), while in a
+continuous rollout changing the application tick changes contact duration and
+can trigger additional impulses. A correct model needs a stronger event-ending
+signal than geometric contact, gap, or center-velocity closing speed.
+
+Post-solver observations confirm that a positive Bullet normal impulse is not
+the missing event-ending signal: Rocket League can emit `OnHitBall` on cached or
+separating contact frames where the sim's normal impulse is zero. The matched
+manifold geometry is generally close (roughly 0.9-4 UU location error), while
+the exposed sim normal uses the opposite convention from the recording
+(`normal_dot = -1`). A global contact-margin increase from 0.02 to 0.03 improves
+recall but starts contacts early and loses too much precision, so 0.02 remains
+the production threshold.
+
+### Car-Ball Contact Lifetime Deep Dive
+
+Measured 2026-08-24. The apparent lifetime mismatch is primarily a **contact
+phase** problem, not a missing manifold-age rule:
+
+- This port does not persist manifold points across ticks. Each narrowphase pass
+  builds a new `PersistentManifold`, and the solver clears the manifold list
+  after setup. There is no point age or lifetime field to tune.
+- The added-contact callback runs before `refresh_contact_points`; Arena records
+  it immediately. A point removed by refresh can therefore reach
+  `Ball::on_hit` without producing a `contact_solved` observation. The focused
+  soft/push episodes did not rely on that discrepancy: their recorded callback
+  points also reached the solver.
+- Three-frame episodes end with a separating, zero-normal-impulse contact. That
+  frame is still a valid Rocket League `OnHitBall` frame, confirming again that
+  solver impulse cannot define event lifetime.
+
+The decisive comparison is geometry at onset. In slow-push episode 86, Rocket
+League's car-ball gap moves `0.742 -> -0.223` on the first event frame, while
+the discrete sim still solves at a positive `0.741` gap. Its first regular plus
+extra response is close in velocity, but applying it for the whole frame leaves
+the ball roughly 1 UU farther from the car. By the third frame the sim reaches
+`2.97` UU and drops contact, while Rocket League remains at `1.37` UU and emits
+the second every-other extra impulse. Soft touch is different: it already
+overlaps before onset, and sim/game gaps stay within about 0.1 UU through the
+episode, so the third callback survives and `EveryOtherTick` reproduces the
+total impulse.
+
+Two blunt TOI approximations were tested and removed:
+
+- Two global half-steps improved slow-push exact contact recall from 0.684 to
+  0.895, but solved existing contacts twice and worsened episode response.
+- Zero contact margin plus four substeps delayed onset into penetration but
+  repeatedly solved deep overlap, badly regressing both soft touch and slow
+  push. Merely changing margin or substep count is not a valid fix.
+
+A **one-shot car-ball time-of-impact solve** is now implemented for spherical
+balls. Approaching sphere/OBB pairs that cross actual touching during the frame
+are withheld from start-of-frame dispatch, advanced to the crossing fraction,
+generated/solved once, and then integrated through the remainder. Existing
+start-of-frame contacts stay on the normal discrete path. The initial solver
+consumes gravity and control velocity once; later TOI solves see only contact
+velocity changes. Collision filters, disabled contact response, multiple cars,
+and impacts redirected by earlier solves are preserved. Snowday's convex puck
+continues to use the discrete path.
+
+The focused result is useful but mixed. Slow-push episode 86 now keeps contacts
+on ticks `[86, 87, 88]` instead of `[86, 87]`, and its third-frame gap falls from
+`2.97` to `1.45` UU. Across all slow-push episodes, however, mean impulse gap is
+effectively flat (`28.6 -> 28.5 UU/s`). At 0.5 seconds, mean slow-push ball
+velocity error improves `41.22 -> 40.37 UU/s` while mean position error moves
+`6.45 -> 6.61 UU`; soft-touch velocity improves `18.43 -> 18.25 UU/s` while
+position moves `5.84 -> 6.25 UU`. The full 452-case comparison suite still
+passes. Treat TOI as a phase-correct collision primitive, not a replacement for
+the unresolved multi-frame `OnHitBall` cadence model.
 
 ## Ground-Truth Validation
 
@@ -183,7 +291,11 @@ The harness therefore splits the measurement in two:
   `onset−1`, then free-runs both steps on the recorded controls — restoring in
   between would re-impose the recording's arbitrary split. Budget:
   `RL_IMPULSE_TOL` (default 0.1 UU/s, wider than the per-step bar by roughly the
-  two steps of ordinary integration error it contains).
+  two steps of ordinary integration error it contains). Grounded jumps that
+  overlap geometrically confirmed car-ball contact include one additional tick:
+  RL spreads that collision response into the frame after the jump window, so a
+  two-step comparison would stop mid-event and misattribute collision phase to
+  jump magnitude.
 
 Report lines look like:
 

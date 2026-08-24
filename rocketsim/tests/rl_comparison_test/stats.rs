@@ -16,7 +16,13 @@ pub enum Field {
 }
 
 impl Field {
-    pub const ALL: [Field; 5] = [Field::Pos, Field::Vel, Field::AngVel, Field::RotFwd, Field::RotUp];
+    pub const ALL: [Field; 5] = [
+        Field::Pos,
+        Field::Vel,
+        Field::AngVel,
+        Field::RotFwd,
+        Field::RotUp,
+    ];
 
     /// Fields that hard-gate the test when their percentile exceeds budget.
     pub const HARD_GATED: [Field; 2] = [Field::Pos, Field::Vel];
@@ -189,9 +195,7 @@ impl FieldStats {
             self.sorted = true;
         }
         // First index with value > threshold.
-        let idx = self
-            .mags
-            .partition_point(|v| *v <= threshold);
+        let idx = self.mags.partition_point(|v| *v <= threshold);
         (self.mags.len() - idx) as f64 / self.mags.len() as f64
     }
 

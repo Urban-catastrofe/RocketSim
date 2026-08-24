@@ -22,13 +22,29 @@
 //! step then closes, so a single restored step cannot produce the bump however
 //! correct the impulse is. Free-running two steps lets the first close the gap
 //! and the second fire, which tests the magnitude with the timing divided out.
+//! A grounded jump overlapping car-ball contact gets one additional step because
+//! Rocket League spreads that collision response across the following frame.
 
-use glam::Vec3A;
+use glam::{Mat3A, Vec3A};
 use rocketsim::CarControls;
 
 use super::config::HarnessConfig;
 use super::recording::Recording;
 use super::runner::{has_discontinuity, is_car_sentinel, make_arena, set_state_to_record_tick};
+
+fn ball_touches_car(recording: &Recording, tick: usize, car: usize) -> bool {
+    let tick = &recording.ticks[tick];
+    let car = &tick.car_records[car].phys;
+    super::residual::ball_touches_car(
+        tick.ball_record.pos.into(),
+        car.pos.into(),
+        Mat3A::from_cols(
+            car.rot.rows[0].into(),
+            car.rot.rows[1].into(),
+            car.rot.rows[2].into(),
+        ),
+    )
+}
 
 /// Which mechanic produced the impulse, for reporting. A bump is identified by
 /// the onset mark rather than by a flag — the observer records no bump event.
@@ -116,8 +132,21 @@ pub fn measure_impulses(recording: &Recording, cfg: &HarnessConfig) -> ImpulseRe
                 report.unmeasurable += 1;
                 continue;
             }
+            let kind = classify(&recording.ticks[onset].car_records[car], is_bump);
+            let extended_end = end + stride;
+            let extend_for_ball_contact = kind == "jump"
+                && extended_end < recording.ticks.len()
+                && !has_discontinuity(recording, end, stride)
+                && [onset, end, extended_end]
+                    .into_iter()
+                    .any(|tick| ball_touches_car(recording, tick, car));
+            let measured_end = if extend_for_ball_contact {
+                extended_end
+            } else {
+                end
+            };
             let from = &recording.ticks[start];
-            let real_end = &recording.ticks[end].car_records[car];
+            let real_end = &recording.ticks[measured_end].car_records[car];
             if real_end.is_demoed || is_car_sentinel(&real_end.phys) {
                 report.unmeasurable += 1;
                 continue;
@@ -127,7 +156,13 @@ pub fn measure_impulses(recording: &Recording, cfg: &HarnessConfig) -> ImpulseRe
             for (j, cr) in recording.ticks[onset].car_records.iter().enumerate() {
                 controls[j] = cr.prev_controls.into();
             }
-            set_state_to_record_tick(&mut arena, &car_idcs, from, &controls);
+            set_state_to_record_tick(
+                &mut arena,
+                &car_idcs,
+                from,
+                start.checked_sub(stride).map(|i| &recording.ticks[i]),
+                &controls,
+            );
             arena.step_tick();
 
             // Step 2: only the controls advance — no restore, so the sim carries
@@ -139,7 +174,17 @@ pub fn measure_impulses(recording: &Recording, cfg: &HarnessConfig) -> ImpulseRe
             }
             arena.step_tick();
 
-            let sim = arena.get_car_state(car_idcs[car]);
+            if extend_for_ball_contact {
+                for (j, &car_idx) in car_idcs.iter().enumerate() {
+                    let c: CarControls = recording.ticks[extended_end].car_records[j]
+                        .prev_controls
+                        .into();
+                    arena.set_car_controls(car_idx, c);
+                }
+                arena.step_tick();
+            }
+            let sim = *arena.get_car_state(car_idcs[car]);
+
             let v0: Vec3A = from.car_records[car].phys.lin_vel.into();
             let v_end: Vec3A = real_end.phys.lin_vel.into();
             let p_end: Vec3A = real_end.phys.pos.into();
@@ -147,7 +192,7 @@ pub fn measure_impulses(recording: &Recording, cfg: &HarnessConfig) -> ImpulseRe
             report.events.push(ImpulseEvent {
                 car,
                 onset_tick: onset,
-                kind: classify(&recording.ticks[onset].car_records[car], is_bump),
+                kind,
                 game_dvel: v_end - v0,
                 sim_dvel: sim.phys.vel - v0,
                 vel_err: (sim.phys.vel - v_end).length(),

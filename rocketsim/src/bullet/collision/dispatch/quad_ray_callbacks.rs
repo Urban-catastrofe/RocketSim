@@ -44,7 +44,7 @@ pub trait QuadRayResultCallback {
     }
     fn needs_collision(&self, proxy0: &BroadphaseProxy) -> bool {
         let base = self.get_base();
-        if base.ignore_obj_world_idx == Some(proxy0.client_obj_idx) {
+        if base.ignore_obj_world_idx == Some(proxy0.client_obj_idx as usize) {
             return false;
         }
 
@@ -129,15 +129,15 @@ impl<'a, T: QuadRayResultCallback> QuadRayCallback<'a, T> {
 
 impl<T: QuadRayResultCallback> BroadphaseAabbCallback for QuadRayCallback<'_, T> {
     fn process(&mut self, proxy: &BroadphaseProxy) -> bool {
-        let rb = &self.world.collision_objs[proxy.client_obj_idx];
-        let handle = &self.world.broadphase_pair_cache.handles[rb.get_broadphase_handle()];
+        let obj_idx = proxy.client_obj_idx as usize;
+        let rb = &self.world.collision_objs[obj_idx];
 
-        if self.result_callback.needs_collision(handle) {
+        if self.result_callback.needs_collision(proxy) {
             CollisionWorld::quad_ray_test(
                 self.ray_from_world,
                 self.ray_to_world,
                 rb,
-                proxy.client_obj_idx,
+                obj_idx,
                 self.result_callback,
             );
         }

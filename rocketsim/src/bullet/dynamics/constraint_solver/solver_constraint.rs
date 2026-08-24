@@ -30,6 +30,12 @@ pub struct SolverConstraint {
     pub solver_body_id_a: usize,
     pub solver_body_id_b: usize,
     pub is_special: bool,
+    pub body_idx_a: usize,
+    pub body_idx_b: usize,
+    pub rel_pos_a: Vec3A,
+    pub rel_pos_b: Vec3A,
+    pub manifold_point: Option<ManifoldPoint>,
+    pub relative_velocity_before: Vec3A,
 }
 
 impl SolverConstraint {

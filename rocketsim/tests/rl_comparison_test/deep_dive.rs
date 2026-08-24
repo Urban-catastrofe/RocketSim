@@ -92,12 +92,7 @@ pub fn dump_window(recording: &Recording, cfg: &HarnessConfig, center: usize, en
 
     println!(
         "[{}] DIVE window ticks {}..={} (center={}, stride={}, radius={} ticks/side)",
-        recording.name,
-        start,
-        end,
-        center,
-        stride,
-        cfg.deep_dive_radius
+        recording.name, start, end, center, stride, cfg.deep_dive_radius
     );
 
     let (mut arena, car_idcs) = make_arena(num_cars);
@@ -109,7 +104,13 @@ pub fn dump_window(recording: &Recording, cfg: &HarnessConfig, center: usize, en
         for (j, cr) in to_tick.car_records.iter().enumerate() {
             controls_buf[j] = cr.prev_controls.into();
         }
-        set_state_to_record_tick(&mut arena, &car_idcs, from_tick, &controls_buf);
+        set_state_to_record_tick(
+            &mut arena,
+            &car_idcs,
+            from_tick,
+            i.checked_sub(stride).map(|i| &recording.ticks[i]),
+            &controls_buf,
+        );
         arena.step_tick();
 
         let time_s = i as f32 * TICK_TIME / stride as f32;
@@ -124,13 +125,7 @@ pub fn dump_window(recording: &Recording, cfg: &HarnessConfig, center: usize, en
             let ang_e = delta.get(Field::AngVel).mag;
             println!(
                 "[{}] DIVE {} t={:>6} ({:7.3}s) ball pos_e={:9.4} vel_e={:9.4} ang_e={:8.4}",
-                recording.name,
-                marker,
-                i,
-                time_s,
-                pos_e,
-                vel_e,
-                ang_e,
+                recording.name, marker, i, time_s, pos_e, vel_e, ang_e,
             );
             println!(
                 "[{}] DIVE        SIM  pos=({:.3},{:.3},{:.3}) vel=({:.3},{:.3},{:.3}) | REAL pos=({:.3},{:.3},{:.3}) vel=({:.3},{:.3},{:.3})",
@@ -149,14 +144,7 @@ pub fn dump_window(recording: &Recording, cfg: &HarnessConfig, center: usize, en
                 to_tick.ball_record.lin_vel.z,
             );
             if i == center {
-                print_center_snapshot(
-                    &recording.name,
-                    &[],
-                    ball_state,
-                    to_tick,
-                    entity,
-                    num_cars,
-                );
+                print_center_snapshot(&recording.name, &[], ball_state, to_tick, entity, num_cars);
             }
             continue;
         }
@@ -207,12 +195,7 @@ pub fn dump_window(recording: &Recording, cfg: &HarnessConfig, center: usize, en
             .num_wheels_in_contact();
         println!(
             "[{}] DIVE        {} nwheels={} from_pos=({:.1},{:.1},{:.1})",
-            recording.name,
-            wcn,
-            nw,
-            from_car.phys.pos.x,
-            from_car.phys.pos.y,
-            from_car.phys.pos.z
+            recording.name, wcn, nw, from_car.phys.pos.x, from_car.phys.pos.y, from_car.phys.pos.z
         );
         println!(
             "[{}] DIVE        SIM  pos=({:.2},{:.2},{:.2}) vel=({:.1},{:.1},{:.1}) | REAL pos=({:.2},{:.2},{:.2}) vel=({:.1},{:.1},{:.1})",

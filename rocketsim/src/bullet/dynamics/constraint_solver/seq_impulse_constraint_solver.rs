@@ -3,13 +3,11 @@ use glam::Vec3A;
 use super::{contact_solver_info, solver_body::SolverBody, solver_constraint::SolverConstraint};
 use crate::bullet::{
     collision::narrowphase::{
-        manifold_point::ManifoldPoint, persistent_manifold::PersistentManifold,
+        manifold_point::ManifoldPoint,
+        persistent_manifold::{ContactAddedCallback, ContactSolveInfo, PersistentManifold},
     },
     dynamics::rigid_body::{CollisionFlags, RigidBody},
-    linear_math::{
-        plane_space_1,
-        transform_util::{integrate_trans, integrate_trans_no_rot},
-    },
+    linear_math::{integrate_trans, integrate_trans_no_rot, plane_space_1},
 };
 
 struct SpecialResolveInfo {
@@ -100,16 +98,17 @@ impl SeqImpulseConstraintSolver {
         }
     }
 
-    pub fn solve_group(
+    pub fn solve_group<T: ContactAddedCallback>(
         &mut self,
         collision_objs: &mut [RigidBody],
         non_static_bodies: &[usize],
         manifolds: &mut Vec<PersistentManifold>,
         time_step: f32,
+        contact_callback: &mut T,
     ) {
         self.solve_group_setup(collision_objs, non_static_bodies, manifolds, time_step);
         self.solve_group_iterations();
-        self.solve_group_finish(collision_objs, time_step);
+        self.solve_group_finish(collision_objs, time_step, contact_callback);
     }
 
     fn solve_group_setup(
@@ -161,17 +160,25 @@ impl SeqImpulseConstraintSolver {
                 let rb1 = solver_body_b.original_body.map(|_| &*body1);
                 let friction_idx = self.tmp_solver_contact_friction_constraint_pool.len();
 
-                self.tmp_solver_contact_constraint_pool.push(
-                    SolverConstraint::get_contact_constraint(
-                        (solver_body_id_a, solver_body_id_b),
-                        (solver_body_a, solver_body_b),
-                        (rb0, rb1),
-                        (rel_pos1, rel_pos2),
-                        cp,
-                        friction_idx,
-                        time_step,
-                    ),
+                let mut contact_constraint = SolverConstraint::get_contact_constraint(
+                    (solver_body_id_a, solver_body_id_b),
+                    (solver_body_a, solver_body_b),
+                    (rb0, rb1),
+                    (rel_pos1, rel_pos2),
+                    cp,
+                    friction_idx,
+                    time_step,
                 );
+                contact_constraint.body_idx_a = manifold.body0_idx;
+                contact_constraint.body_idx_b = manifold.body1_idx;
+                contact_constraint.rel_pos_a = rel_pos1;
+                contact_constraint.rel_pos_b = rel_pos2;
+                contact_constraint.manifold_point = Some(*cp);
+                contact_constraint.relative_velocity_before = solver_body_a
+                    .get_vel_in_local_point_no_delta(rel_pos1)
+                    - solver_body_b.get_vel_in_local_point_no_delta(rel_pos2);
+                self.tmp_solver_contact_constraint_pool
+                    .push(contact_constraint);
 
                 cp.calc_lat_friction_dir(solver_body_a, solver_body_b, rel_pos1, rel_pos2);
 
@@ -379,7 +386,11 @@ impl SeqImpulseConstraintSolver {
         // than 128 contacts — unrealistic in Rocketsim — disables the mask and
         // simply runs every contact on every iteration (correct, no early-exit).
         let masked = n <= 128;
-        let mut should_run = if n >= 128 { u128::MAX } else { (1u128 << n) - 1 };
+        let mut should_run = if n >= 128 {
+            u128::MAX
+        } else {
+            (1u128 << n) - 1
+        };
 
         for _ in 0..contact_solver_info::NUM_ITERATIONS {
             for (i, contact) in self
@@ -469,7 +480,34 @@ impl SeqImpulseConstraintSolver {
         }
     }
 
-    fn solve_group_finish(&mut self, collision_objs: &mut [RigidBody], time_step: f32) {
+    fn solve_group_finish<T: ContactAddedCallback>(
+        &mut self,
+        collision_objs: &mut [RigidBody],
+        time_step: f32,
+        contact_callback: &mut T,
+    ) {
+        for contact in &self.tmp_solver_contact_constraint_pool {
+            let Some(manifold_point) = contact.manifold_point else {
+                continue;
+            };
+            let solver_body_a = &self.tmp_solver_body_pool[contact.solver_body_id_a];
+            let solver_body_b = &self.tmp_solver_body_pool[contact.solver_body_id_b];
+            let relative_velocity_after = solver_body_a
+                .get_vel_in_local_point_with_delta(contact.rel_pos_a)
+                - solver_body_b.get_vel_in_local_point_with_delta(contact.rel_pos_b);
+            contact_callback.contact_solved(
+                ContactSolveInfo {
+                    manifold_point,
+                    normal_impulse: contact.applied_impulse,
+                    push_impulse: contact.applied_push_impulse,
+                    relative_velocity_before: contact.relative_velocity_before,
+                    relative_velocity_after,
+                },
+                &collision_objs[contact.body_idx_a],
+                &collision_objs[contact.body_idx_b],
+            );
+        }
+
         // writeBackBodies
         for solver in &mut self.tmp_solver_body_pool {
             let Some(body) = solver.original_body.map(|idx| &mut collision_objs[idx]) else {

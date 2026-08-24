@@ -4,8 +4,17 @@ use glam::{Vec3A, Vec4};
 use super::manifold_point::ManifoldPoint;
 use crate::bullet::{
     dynamics::rigid_body::{CollisionFlags, RigidBody},
-    linear_math::{AffineExt, plane_space_2},
+    linear_math::{AffineExt, plane_space_1},
 };
+
+#[derive(Debug, Copy, Clone)]
+pub struct ContactSolveInfo {
+    pub manifold_point: ManifoldPoint,
+    pub normal_impulse: f32,
+    pub push_impulse: f32,
+    pub relative_velocity_before: Vec3A,
+    pub relative_velocity_after: Vec3A,
+}
 
 pub trait ContactAddedCallback {
     fn callback(
@@ -15,6 +24,14 @@ pub trait ContactAddedCallback {
         body_b: &RigidBody,
         idx: Option<usize>,
     );
+
+    fn contact_solved(
+        &mut self,
+        _contact: ContactSolveInfo,
+        _body_a: &RigidBody,
+        _body_b: &RigidBody,
+    ) {
+    }
 }
 
 pub const CONTACT_BREAKING_THRESHOLD: f32 = 0.02;
@@ -201,8 +218,7 @@ impl PersistentManifold {
         new_pt.combined_friction = Self::calculate_combined_friction(body0, body1);
         new_pt.combined_restitution = Self::calculate_combined_restitution(body0, body1);
 
-        (new_pt.lateral_friction_dir_1, new_pt.lateral_friction_dir_2) =
-            plane_space_2(new_pt.normal_world_on_b);
+        new_pt.lateral_friction_dir_1 = plane_space_1(new_pt.normal_world_on_b);
 
         let insert_idx = self.add_manifold_point(new_pt);
 

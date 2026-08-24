@@ -295,7 +295,11 @@ pub fn evaluate(report: &mut Report, cfg: &HarnessConfig) -> (GateOutcome, Vec<S
             "[{}] GATE: FAIL ({} violation{})",
             report.name,
             outcome.violations.len(),
-            if outcome.violations.len() == 1 { "" } else { "s" },
+            if outcome.violations.len() == 1 {
+                ""
+            } else {
+                "s"
+            },
         ));
         for v in &outcome.violations {
             lines.push(format!("[{}]   VIOLATION {}", report.name, v));

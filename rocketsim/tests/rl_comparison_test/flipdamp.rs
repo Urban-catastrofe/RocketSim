@@ -120,7 +120,13 @@ pub fn analyze(recording: &Recording) {
         for (j, car_record) in to_tick.car_records.iter().enumerate() {
             controls_buf[j] = car_record.prev_controls.into();
         }
-        set_state_to_record_tick(&mut arena, &car_idcs, from_tick, &controls_buf);
+        set_state_to_record_tick(
+            &mut arena,
+            &car_idcs,
+            from_tick,
+            i.checked_sub(stride).map(|i| &recording.ticks[i]),
+            &controls_buf,
+        );
         arena.step_tick();
 
         for (j, &car_idx) in car_idcs.iter().enumerate() {
@@ -186,7 +192,7 @@ pub fn analyze(recording: &Recording) {
             // constantly, since the powerslide button *is* air roll. The flip's
             // own axis is recorded: `flip_rel_torque` is set once at flip start
             // and `update_air_torque` applies
-            // `rot * (frt.x * TORQUE_X, frt.y * TORQUE_Y, 0)`, so a live flip's
+            // `rot * (frt.x * TORQUE.x, frt.y * TORQUE.y, 0)`, so a live flip's
             // angular velocity should lie along that axis in the car frame.
             let rot = rot_of(&from.phys);
             let av_w = Vec3A::new(av.x, av.y, av.z);
@@ -197,12 +203,9 @@ pub fn analyze(recording: &Recording) {
                 av_w.dot(rot.z_axis),
             );
             let frt = Vec3A::new(from.flip_rel_torque.x, from.flip_rel_torque.y, 0.0);
-            let axis_l = Vec3A::new(
-                frt.x * rocketsim::consts::car::flip::TORQUE_X,
-                frt.y * rocketsim::consts::car::flip::TORQUE_Y,
-                0.0,
-            )
-            .normalize_or_zero();
+            let flip_torque = rocketsim::consts::car::flip::TORQUE;
+            let axis_l =
+                Vec3A::new(frt.x * flip_torque.x, frt.y * flip_torque.y, 0.0).normalize_or_zero();
             // Signed component of the car-frame spin along the flip's own axis,
             // and how much of the total spin that accounts for.
             let along = av_l.dot(axis_l);

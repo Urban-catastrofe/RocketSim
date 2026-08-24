@@ -94,10 +94,12 @@ fn init_from_path(collision_meshes_folder: &Path, silent: bool) -> IoResult<()> 
     init_from_mem(mesh_file_map, silent)
 }
 
-pub fn init_from_mem(
-    byte_mesh_file_map: FxHashMap<GameMode, Vec<Vec<u8>>>,
-    silent: bool,
-) -> IoResult<()> {
+pub fn init_from_mem<I, V, B>(byte_mesh_file_map: I, silent: bool) -> IoResult<()>
+where
+    I: IntoIterator<Item = (GameMode, V)>,
+    V: IntoIterator<Item = B>,
+    B: AsRef<[u8]>,
+{
     if !silent {
         let _ = logging::try_init();
     }
@@ -123,17 +125,19 @@ pub fn init_from_mem(
     for (game_mode, byte_mesh_files) in byte_mesh_file_map {
         info!("Loading arena meshes for {}...", game_mode.name());
 
-        if byte_mesh_files.is_empty() {
+        let mut byte_mesh_files = byte_mesh_files.into_iter().peekable();
+
+        if byte_mesh_files.peek().is_none() {
             info!("\tNo meshes, skipping");
             continue;
         }
 
-        let mut meshes = Vec::with_capacity(byte_mesh_files.len());
-        let mut mesh_files = Vec::with_capacity(byte_mesh_files.len());
+        let mut meshes = Vec::new();
+        let mut mesh_files = Vec::new();
         let mut target_hashes = game_mode.get_hashes();
 
-        for (i, entry) in byte_mesh_files.into_iter().enumerate() {
-            let mesh_file = CollisionMeshFile::read_from_bytes(&entry)?;
+        for (i, entry) in byte_mesh_files.enumerate() {
+            let mesh_file = CollisionMeshFile::read_from_bytes(entry.as_ref())?;
             let hash = mesh_file.get_hash();
             let Some(hash_count) = target_hashes.get_mut(&hash) else {
                 warn!(

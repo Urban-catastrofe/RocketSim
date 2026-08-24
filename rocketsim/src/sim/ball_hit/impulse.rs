@@ -68,9 +68,8 @@ pub fn compute_impulse(ctx: &HitContext, config: &BallHitConfig) -> Vec3A {
     };
 
     let mut hit_dir = (rel_pos * Vec3A::new(1.0, 1.0, z_scale)).normalize_or_zero();
-    let forward_dir_adjustment = ctx.car_forward
-        * hit_dir.dot(ctx.car_forward)
-        * (1.0 - config.forward_scale);
+    let forward_dir_adjustment =
+        ctx.car_forward * hit_dir.dot(ctx.car_forward) * (1.0 - config.forward_scale);
     hit_dir = (hit_dir - forward_dir_adjustment).normalize_or_zero();
 
     hit_dir * rel_speed * config.factor_curve.get_output(rel_speed)

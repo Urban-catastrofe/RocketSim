@@ -173,7 +173,7 @@ impl StateStats {
             self.air_time_err.add(pred.air_time - real.air_time);
         }
         if pred.is_jumping || real.is_jumping {
-            self.jump_time_err.add(pred.jump_time - real.jump_time);
+            self.jump_time_err.add(pred.jump_time() - real.jump_time);
         }
     }
 

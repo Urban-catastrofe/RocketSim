@@ -144,14 +144,17 @@ pub mod car {
     pub mod jump {
         pub const ACCEL: f32 = 4375.0 / 3.0;
         pub const IMMEDIATE_FORCE: f32 = 875.0 / 3.0;
-        pub const MIN_TIME: f32 = 0.025;
-        pub const RESET_TIME_PAD: f32 = 0.25;
-        pub const MAX_TIME: f32 = 0.2;
+        /// Minimum hold duration: 3 ticks (0.025 s @ 120 Hz)
+        pub const MIN_TICKS: u32 = 3;
+        /// Maximum hold duration: 24 ticks (0.2 s @ 120 Hz)
+        pub const MAX_TICKS: u32 = 24;
         /// Can be at most 1.25 seconds after the jump is finished
         pub const DOUBLEJUMP_MAX_DELAY: f32 = 1.25;
     }
 
     pub mod flip {
+        use glam::Vec3A;
+
         pub const Z_DAMP_120: f32 = 0.35;
         pub const Z_DAMP_START: f32 = 0.15;
         pub const Z_DAMP_END: f32 = 0.21;
@@ -160,10 +163,11 @@ pub mod car {
         pub const PITCHLOCK_TIME: f32 = 1.0;
         pub const PITCHLOCK_EXTRA_TIME: f32 = 0.3;
         pub const INITIAL_VEL_SCALE: f32 = 500.0;
-        /// Left/Right
-        pub const TORQUE_X: f32 = 260.0;
-        /// Forward/backward
-        pub const TORQUE_Y: f32 = 224.0;
+        /// X: Left/Right
+        /// Y: Forward/Backward
+        pub const TORQUE: Vec3A = Vec3A::new(260.0, 224.0, 0.0);
+        pub const SPIN_CAP_X: f32 = 7.4396;
+        pub const SPIN_CAP_Y: f32 = 7.2348;
         pub const FORWARD_IMPULSE_MAX_SPEED_SCALE: f32 = 1.0;
         pub const SIDE_IMPULSE_MAX_SPEED_SCALE: f32 = 1.9;
         pub const BACKWARD_IMPULSE_MAX_SPEED_SCALE: f32 = 2.5;
