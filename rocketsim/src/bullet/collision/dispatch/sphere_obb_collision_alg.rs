@@ -26,19 +26,26 @@ fn integrate_obb_trans(
     trans
 }
 
-fn separation_at_transforms(
+fn separation_info_at_transforms(
     sphere_pos: Vec3A,
     radius: f32,
     obb_trans: Affine3A,
     obb_shape: &CompoundShape,
-) -> f32 {
+) -> (f32, Vec3A) {
     let child_world_trans = obb_trans * obb_shape.child_trans;
     let sphere_from_local = child_world_trans.inv_x_form(sphere_pos);
     let box_extents = obb_shape.child_shape.get_half_extents();
     let closest = sphere_from_local.clamp(-box_extents, box_extents);
-    let center_distance = (sphere_from_local - closest).length();
+    let delta = sphere_from_local - closest;
+    let center_distance = delta.length();
+    let normal = child_world_trans
+        .transform_vector3a(delta.normalize_or_zero())
+        .normalize_or_zero();
 
-    center_distance - radius - obb_shape.child_shape.get_margin()
+    (
+        center_distance - radius - obb_shape.child_shape.get_margin(),
+        normal,
+    )
 }
 
 pub(crate) fn separation(
@@ -47,12 +54,13 @@ pub(crate) fn separation(
     obb_obj: &RigidBody,
     obb_shape: &CompoundShape,
 ) -> f32 {
-    separation_at_transforms(
+    separation_info_at_transforms(
         sphere_obj.get_world_trans().translation,
         sphere_shape.get_radius(),
         *obb_obj.get_world_trans(),
         obb_shape,
     )
+    .0
 }
 
 pub(crate) fn time_of_impact(
@@ -70,14 +78,14 @@ pub(crate) fn time_of_impact(
     let obb_start_rot = obb_obj.get_world_rot();
     let radius = sphere_shape.get_radius();
 
-    let separation_at = |time: f32| {
+    let separation_info_at = |time: f32| {
         let sphere_pos = sphere_start + sphere_lin_vel * time;
         let obb_trans =
             integrate_obb_trans(obb_start, obb_start_rot, obb_lin_vel, obb_ang_vel, time);
-        separation_at_transforms(sphere_pos, radius, obb_trans, obb_shape)
+        separation_info_at_transforms(sphere_pos, radius, obb_trans, obb_shape)
     };
 
-    let mut separation = separation_at(0.0);
+    let (mut separation, mut normal) = separation_info_at(0.0);
     if separation <= TOI_DISTANCE_EPSILON || time_step <= 0.0 {
         return None;
     }
@@ -86,17 +94,19 @@ pub(crate) fn time_of_impact(
         + (obb_shape.child_shape.get_half_extents()
             + Vec3A::splat(obb_shape.child_shape.get_margin()))
         .length();
-    let speed_bound = (sphere_lin_vel - obb_lin_vel).length() + obb_ang_vel.length() * box_radius;
-    if speed_bound <= f32::EPSILON {
-        return None;
-    }
-
     let mut lower = 0.0;
     let mut upper = None;
     for _ in 0..TOI_MAX_ITERATIONS {
-        let advance = (separation / speed_bound).max(TOI_TIME_EPSILON);
+        let relative_lin_vel = sphere_lin_vel - obb_lin_vel;
+        let closing_speed =
+            (-relative_lin_vel.dot(normal)).max(0.0) + obb_ang_vel.length() * box_radius;
+        if closing_speed <= f32::EPSILON {
+            return None;
+        }
+
+        let advance = (separation / closing_speed).max(TOI_TIME_EPSILON);
         let next = (lower + advance).min(time_step);
-        let next_separation = separation_at(next);
+        let (next_separation, next_normal) = separation_info_at(next);
 
         if next_separation <= TOI_DISTANCE_EPSILON {
             upper = Some(next);
@@ -108,12 +118,13 @@ pub(crate) fn time_of_impact(
 
         lower = next;
         separation = next_separation;
+        normal = next_normal;
     }
 
     let mut upper = upper?;
     for _ in 0..16 {
         let middle = 0.5 * (lower + upper);
-        if separation_at(middle) > TOI_DISTANCE_EPSILON {
+        if separation_info_at(middle).0 > TOI_DISTANCE_EPSILON {
             lower = middle;
         } else {
             upper = middle;
@@ -287,8 +298,7 @@ mod tests {
     #[test]
     fn converges_with_large_tangential_velocity() {
         let sphere = SphereShape::new(0.5);
-        let mut sphere_info =
-            RigidBodyConstructionInfo::new(1.0, CollisionShapes::Sphere(sphere));
+        let mut sphere_info = RigidBodyConstructionInfo::new(1.0, CollisionShapes::Sphere(sphere));
         sphere_info.start_world_trans.translation = Vec3A::new(3.0, 0.0, 0.0);
         let sphere = RigidBody::new(sphere_info);
 

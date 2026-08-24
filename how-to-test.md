@@ -178,13 +178,25 @@ Two blunt TOI approximations were tested and removed:
   repeatedly solved deep overlap, badly regressing both soft touch and slow
   push. Merely changing margin or substep count is not a valid fix.
 
-The next viable implementation is a **one-shot car-ball time-of-impact solve**:
-for an approaching sphere/OBB pair that crosses actual touching during the
-frame, integrate once to the crossing fraction, generate/solve that contact
-once, then integrate the remaining fraction. Existing start-of-frame contacts
-must stay on the normal discrete path. Tick-level forces must not be reapplied
-across the split. This is narrower than global CCD and directly targets the
-measured phase error.
+A **one-shot car-ball time-of-impact solve** is now implemented for spherical
+balls. Approaching sphere/OBB pairs that cross actual touching during the frame
+are withheld from start-of-frame dispatch, advanced to the crossing fraction,
+generated/solved once, and then integrated through the remainder. Existing
+start-of-frame contacts stay on the normal discrete path. The initial solver
+consumes gravity and control velocity once; later TOI solves see only contact
+velocity changes. Collision filters, disabled contact response, multiple cars,
+and impacts redirected by earlier solves are preserved. Snowday's convex puck
+continues to use the discrete path.
+
+The focused result is useful but mixed. Slow-push episode 86 now keeps contacts
+on ticks `[86, 87, 88]` instead of `[86, 87]`, and its third-frame gap falls from
+`2.97` to `1.45` UU. Across all slow-push episodes, however, mean impulse gap is
+effectively flat (`28.6 -> 28.5 UU/s`). At 0.5 seconds, mean slow-push ball
+velocity error improves `41.22 -> 40.37 UU/s` while mean position error moves
+`6.45 -> 6.61 UU`; soft-touch velocity improves `18.43 -> 18.25 UU/s` while
+position moves `5.84 -> 6.25 UU`. The full 452-case comparison suite still
+passes. Treat TOI as a phase-correct collision primitive, not a replacement for
+the unresolved multi-frame `OnHitBall` cadence model.
 
 ## Ground-Truth Validation
 

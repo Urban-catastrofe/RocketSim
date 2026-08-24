@@ -5,6 +5,8 @@ use super::{
     quad_ray_callbacks::{BridgeTriQuadRayCallback, QuadRayResultCallback},
     sphere_obb_collision_alg,
 };
+
+const ENABLE_CAR_BALL_TOI: bool = false;
 use crate::{
     bullet::{
         collision::{
@@ -199,6 +201,10 @@ impl CollisionWorld {
         time_step: f32,
         include_accumulated_velocity: bool,
     ) -> Option<f32> {
+        if !ENABLE_CAR_BALL_TOI {
+            return None;
+        }
+
         let (sphere, sphere_shape, obb, obb_shape) = self.car_ball_pair(pair.0, pair.1)?;
         let sphere_lin_vel = sphere.lin_vel
             + if include_accumulated_velocity {
