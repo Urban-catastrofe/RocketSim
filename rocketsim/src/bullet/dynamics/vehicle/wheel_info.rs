@@ -278,5 +278,32 @@ impl WheelInfo {
             true,
             false,
         );
+
+        // Informational split of the impulse just applied. `calc_friction_impulses`
+        // builds it as `forward_dir * longitudinal + axle_dir * lateral`, and those
+        // two directions are orthonormal, so projecting the total back onto them
+        // recovers the parts. The longitudinal term carries the engine force, the
+        // brake and rolling resistance; the lateral term is wheel side friction.
+        // They come off separate curves and cannot be identified from their sum.
+        // Scaled by `inv_mass` to match the real entry above (`massed = true`);
+        // the shared angular component stays on the real entry.
+        let axle_dir = self.axle_dir.normalize_or_zero();
+        let forward_dir = raycast_info
+            .contact_normal
+            .cross(axle_dir)
+            .normalize_or_zero();
+        let lin = raycast_info.impulse * time_step * cb.inv_mass;
+        cb.record_impulse(
+            "~WheelsFrictionLong",
+            forward_dir * lin.dot(forward_dir),
+            Vec3A::ZERO,
+            false,
+        );
+        cb.record_impulse(
+            "~WheelsFrictionLat",
+            axle_dir * lin.dot(axle_dir),
+            Vec3A::ZERO,
+            false,
+        );
     }
 }

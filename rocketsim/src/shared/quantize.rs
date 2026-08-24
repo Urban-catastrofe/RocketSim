@@ -40,6 +40,9 @@ fn quantize_vec_ue3(vec: Vec3A, scale: f32, quantize_mode: VecQuantizeMode) -> V
 
 /// Quantizes the position, linear velocity, and angular velocity of a rigid body.
 pub fn quantize(body: &mut RigidBody) {
+    let lin_before = body.lin_vel;
+    let ang_before = body.ang_vel;
+
     let new_pos = quantize_vec_ue3(
         body.get_world_pos() * BT_TO_UU,
         quantize::POS_SCALE,
@@ -59,4 +62,12 @@ pub fn quantize(body: &mut RigidBody) {
     body.set_world_pos(new_pos);
     body.set_lin_vel(new_vel);
     body.set_ang_vel(new_ang_vel);
+
+    // Quantization is not a force, but it does change velocity, so the impulse
+    // ledger has to carry it or the accounting identity blames the constraint
+    // solver for the rounding. Unlike the clamps this fires on nearly every
+    // tick, so it is recorded unconditionally.
+    let lin_delta = body.lin_vel - lin_before;
+    let ang_delta = body.ang_vel - ang_before;
+    body.record_impulse("Quantize", lin_delta, ang_delta, false);
 }

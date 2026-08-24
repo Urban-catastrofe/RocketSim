@@ -227,7 +227,7 @@ impl Ball {
                         };
 
                         rb.add_impulse(
-                            None,
+                            Some("BallKickoffLaunch"),
                             Impulse::Linear(Vec3A::new(0.0, 0.0, launch_vel_z) * UU_TO_BT),
                             false,
                             false,
@@ -251,6 +251,7 @@ impl Ball {
         // harness wipe the queued impulse before it ever fired.
         if self.pending_hit_impulse != Vec3A::ZERO {
             rb.lin_vel += self.pending_hit_impulse;
+            rb.record_impulse("BallCarHit", self.pending_hit_impulse, Vec3A::ZERO, false);
             self.pending_hit_impulse = Vec3A::ZERO;
         }
 
@@ -259,12 +260,19 @@ impl Ball {
         // wall-contact friction torque overshoots the real spin (e.g. rolling
         // down the backboard: real pins at 6.0, the sim hit 14.06 in one tick).
         let ball_max_speed_bt = mutator_config.ball_max_speed * UU_TO_BT;
+        let clamp_lin_before = rb.lin_vel;
+        let clamp_ang_before = rb.ang_vel;
         if rb.lin_vel.length_squared() > ball_max_speed_bt * ball_max_speed_bt {
             rb.lin_vel = rb.lin_vel.normalize() * ball_max_speed_bt;
         }
         let max_ang_speed = consts::ball::MAX_ANG_SPEED;
         if rb.ang_vel.length_squared() > max_ang_speed * max_ang_speed {
             rb.ang_vel = rb.ang_vel.normalize() * max_ang_speed;
+        }
+        let clamp_lin_delta = rb.lin_vel - clamp_lin_before;
+        let clamp_ang_delta = rb.ang_vel - clamp_ang_before;
+        if clamp_lin_delta != Vec3A::ZERO || clamp_ang_delta != Vec3A::ZERO {
+            rb.record_impulse("Clamp", clamp_lin_delta, clamp_ang_delta, false);
         }
 
         self.state.phys.vel = rb.lin_vel * BT_TO_UU;
@@ -390,7 +398,7 @@ impl Ball {
                         * self.state.phys.vel.length()
                         * heatseeker::WALL_BOUNCE_FORCE_SCALE;
                     rb.add_impulse(
-                        None,
+                        Some("BallHeatseekerBounce"),
                         Impulse::Linear(bounce_impulse * UU_TO_BT),
                         false,
                         true,
@@ -399,7 +407,12 @@ impl Ball {
             }
             GameMode::Snowday if !self.ground_stick_applied => {
                 let force = -normal * snowday::PUCK_GROUND_STICK_FORCE * TICK_TIME;
-                rb.add_impulse(None, Impulse::Linear(force), true, true);
+                rb.add_impulse(
+                    Some("BallPuckGroundStick"),
+                    Impulse::Linear(force),
+                    true,
+                    true,
+                );
                 self.ground_stick_applied = true;
             }
             _ => {}

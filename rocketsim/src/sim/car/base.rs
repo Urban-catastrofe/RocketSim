@@ -410,7 +410,7 @@ impl Car {
                 let dodge_torque = rel_dodge_torque * flip::TORQUE * TICK_TIME;
 
                 rb.add_impulse(
-                    None,
+                    Some("FlipTorque"),
                     Impulse::Angular(rb.get_world_trans().matrix3 * dodge_torque),
                     false,
                     true,
@@ -421,7 +421,7 @@ impl Car {
                 let damp_roll = dir_roll.dot(rb.ang_vel) * air_control::DAMPING.z;
                 let damping = dir_yaw * damp_yaw + dir_pitch * damp_pitch + dir_roll * damp_roll;
                 rb.add_impulse(
-                    None,
+                    Some("FlipAirDamping"),
                     Impulse::Angular(
                         damping * const { air_control::TORQUE_APPLY_SCALE * TICK_TIME },
                     ),
@@ -482,7 +482,16 @@ impl Car {
             let rb_torque =
                 (torque - damping) * const { air_control::TORQUE_APPLY_SCALE * TICK_TIME };
 
-            rb.add_impulse(None, Impulse::Angular(rb_torque), false, true);
+            rb.add_impulse(Some("AirControl"), Impulse::Angular(rb_torque), false, true);
+
+            // Informational split of the impulse just applied. `air_control::TORQUE`
+            // and `air_control::DAMPING` are six independent constants and cannot
+            // be identified from their sum, which is all the applied impulse
+            // carries. Scaled separately here, so the two parts need not add back
+            // to `rb_torque` in the last bits -- see `RigidBody::record_impulse`.
+            const AIR_SCALE: f32 = air_control::TORQUE_APPLY_SCALE * TICK_TIME;
+            rb.record_impulse("~AirTorque", Vec3A::ZERO, torque * AIR_SCALE, true);
+            rb.record_impulse("~AirDamping", Vec3A::ZERO, -damping * AIR_SCALE, true);
         }
 
         let throttle_scale = self.state.controls.throttle;
@@ -490,7 +499,12 @@ impl Car {
             let throttle_force = forward_dir
                 * throttle_scale
                 * const { car_consts::drive::THROTTLE_AIR_ACCEL * UU_TO_BT * TICK_TIME };
-            rb.add_impulse(None, Impulse::Linear(throttle_force), false, true);
+            rb.add_impulse(
+                Some("AirThrottle"),
+                Impulse::Linear(throttle_force),
+                false,
+                true,
+            );
         }
     }
 
@@ -570,7 +584,12 @@ impl Car {
 
                 let force =
                     -self.state.get_up_dir() * const { car_consts::autoflip::IMPULSE * UU_TO_BT };
-                rb.add_impulse(None, Impulse::Linear(force), false, false);
+                rb.add_impulse(
+                    Some("AutoFlipImpulse"),
+                    Impulse::Linear(force),
+                    false,
+                    false,
+                );
             }
         }
 
@@ -579,10 +598,12 @@ impl Car {
                 self.state.is_auto_flipping = false;
                 self.state.auto_flip_timer = 0.0;
             } else {
-                rb.ang_vel += self.state.get_forward_dir()
+                let auto_flip_torque = self.state.get_forward_dir()
                     * car_consts::autoflip::TORQUE
                     * self.state.auto_flip_torque_scale
                     * TICK_TIME;
+                rb.ang_vel += auto_flip_torque;
+                rb.record_impulse("AutoFlipTorque", Vec3A::ZERO, auto_flip_torque, false);
                 self.state.auto_flip_timer -= TICK_TIME;
             }
         }
@@ -687,7 +708,7 @@ impl Car {
                             + initial_dodge_vel.y * right_dir_2d;
 
                         rb.add_impulse(
-                            None,
+                            Some("FlipVel"),
                             Impulse::Linear(final_delta_vel * UU_TO_BT),
                             false,
                             false,
@@ -716,7 +737,15 @@ impl Car {
                 && flip_time_pre >= car_consts::flip::Z_DAMP_START
                 && (rb.lin_vel.z < 0.0 || flip_time_pre < car_consts::flip::Z_DAMP_END)
             {
+                let z_before = rb.lin_vel.z;
                 rb.lin_vel.z *= 1.0 - car_consts::flip::Z_DAMP_120;
+                let z_delta = rb.lin_vel.z - z_before;
+                rb.record_impulse(
+                    "FlipZDamp",
+                    Vec3A::new(0.0, 0.0, z_delta),
+                    Vec3A::ZERO,
+                    false,
+                );
             }
         } else if self.state.has_flipped {
             self.state.flip_time += TICK_TIME;
@@ -748,7 +777,7 @@ impl Car {
         let torque_forward = torque_dir_forward * forward_torque_factor;
 
         rb.add_impulse(
-            None,
+            Some("AutoRollForce"),
             Impulse::Linear(
                 ground_down_dir * const { car_consts::autoroll::FORCE * UU_TO_BT * TICK_TIME },
             ),
@@ -757,7 +786,7 @@ impl Car {
         );
 
         rb.add_impulse(
-            None,
+            Some("AutoRollTorque"),
             Impulse::Angular(
                 (torque_forward + torque_right)
                     * const { car_consts::autoroll::TORQUE * TICK_TIME },
@@ -788,7 +817,7 @@ impl Car {
             };
 
             rb.add_impulse(
-                None,
+                Some("Boost"),
                 Impulse::Linear(accel * self.state.get_forward_dir() * (UU_TO_BT * TICK_TIME)),
                 false,
                 true,
@@ -994,6 +1023,7 @@ impl Car {
 
         if self.vel_impulse_cache != Vec3A::ZERO {
             rb.lin_vel += self.vel_impulse_cache;
+            rb.record_impulse("Bump", self.vel_impulse_cache, Vec3A::ZERO, false);
             self.vel_impulse_cache = Vec3A::ZERO;
         }
 

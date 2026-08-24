@@ -349,11 +349,57 @@ impl RigidBody {
                 map.insert((name, accum), (lin_impulse, ang_impulse));
             }
         }
+        #[cfg(not(debug_assertions))]
+        let _ = name;
+    }
+
+    /// Record a velocity change in the per-tick impulse ledger *without*
+    /// applying it.
+    ///
+    /// A few sites change `lin_vel`/`ang_vel` directly instead of going through
+    /// [`Self::add_impulse`]: multiplicative damping, the flip z-damp, the
+    /// cached car-car bump impulse. Without an entry here the ledger's
+    /// accounting identity -- `v_after - v_before == sum of entries + solver
+    /// closure` -- silently folds them into the closure term and blames the
+    /// constraint solver for a force it never applied.
+    ///
+    /// Names beginning with `~` are *informational*: they decompose an impulse
+    /// that is already recorded under its own name (`~AirTorque` and
+    /// `~AirDamping` split the single `AirControl` impulse), so summing them
+    /// alongside the real entries double-counts. Consumers sum only the
+    /// non-`~` entries for the identity and use the `~` entries for
+    /// attribution. Each part is scaled separately, so the parts need not add
+    /// up to the whole in the last bits.
+    ///
+    /// Compiles to nothing outside `debug_assertions`.
+    #[inline]
+    pub fn record_impulse(
+        &mut self,
+        name: &'static str,
+        lin_impulse: Vec3A,
+        ang_impulse: Vec3A,
+        accum: bool,
+    ) {
+        #[cfg(debug_assertions)]
+        {
+            let map = &mut self.dbg_tick_impulse_history;
+            if let Some((lin, ang)) = map.get_mut(&(name, accum)) {
+                *lin += lin_impulse;
+                *ang += ang_impulse;
+            } else {
+                map.insert((name, accum), (lin_impulse, ang_impulse));
+            }
+        }
+        #[cfg(not(debug_assertions))]
+        let _ = (name, lin_impulse, ang_impulse, accum);
     }
 
     pub fn apply_damping(&mut self, time_step: f32) {
         if self.linear_damping != 0.0 {
+            let before = self.lin_vel;
             self.lin_vel *= (1.0 - self.linear_damping).powf(time_step);
+            let delta = self.lin_vel - before;
+            self.record_impulse("Damping", delta, Vec3A::ZERO, false);
         }
     }
 
@@ -447,12 +493,21 @@ impl RigidBody {
     }
 
     pub fn limit_vels(&mut self, max_lin_speed: f32, max_ang_speed: f32) {
+        let lin_before = self.lin_vel;
+        let ang_before = self.ang_vel;
+
         if self.lin_vel.length_squared() > max_lin_speed.powi(2) {
             self.lin_vel = self.lin_vel.normalize_or_zero() * max_lin_speed;
         }
 
         if self.ang_vel.length_squared() > max_ang_speed.powi(2) {
             self.ang_vel = self.ang_vel.normalize_or_zero() * max_ang_speed;
+        }
+
+        let lin_delta = self.lin_vel - lin_before;
+        let ang_delta = self.ang_vel - ang_before;
+        if lin_delta != Vec3A::ZERO || ang_delta != Vec3A::ZERO {
+            self.record_impulse("Clamp", lin_delta, ang_delta, false);
         }
     }
 }
