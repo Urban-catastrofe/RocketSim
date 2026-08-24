@@ -1769,6 +1769,7 @@ order/quantization, often acceptable.
 | `RLKEEPDUP` | `1` to keep the duplicated-car and broken-frame-advance steps *in* the measurement instead of voiding them. They are 0.7% of steps and 21% of error mass, so this inflates every mean by ~25%; for re-measuring the artifact only | off |
 | `RLCARC` | `1` to emit one `CARC` row per overlapping car pair: RL's own contact impulse on the closed relative-velocity axis and the sim's; `2` to survey intra-tick `physics_frame` agreement (`CARCSYNC`/`CARCADV`); `3` with `RLCARC_REC=<name> RLCARC_T=<lo>:<hi>` for a raw per-car dump. See `carcontact.rs` | off |
 | `RLTOUCH` | `1` to emit one `TOUCHROW` + `TOUCHSUSP` per landing-touchdown step: RL's own contact impulse and the sim's, with the wheel ray geometry at both ends of the step; `2` to survey the `has_world_contact` field instead. See `touchdown.rs` | off |
+| `RLLEDGER` | `1` to account for every tick's velocity change by named force and check that the accounting closes; `2` to dump one `LEDGER` row per car-tick for `scripts/ledger_fit.py`. See *Which Force Is Wrong (RLLEDGER)* | off |
 | `RLSUSPDUMP` | `1` to emit one `SUSPROW` per flat-floor step: RL's own suspension impulse and the sim's, with per-wheel compression and rate. See `suspdump.rs` | off |
 | `RLIMP` | `1` to emit one `IMPROW` per impulse-window event: kind, both sides' `dv`, the window error and each side's end speed. The `IMPULSE` rollup prints only the worst three per case, which hides whether a kind's mean is systematic or a handful of outliers. See `impulse_window.rs` | off |
 | `RLIMP_BUMPWIN` | `3` to run bump windows one step longer. Bullet detects contact from the positions at the *start* of a step, so a two-step window that begins with the cars apart cannot produce the bump at all; this separates "never fires" from "fires a tick later" | `2` |
@@ -1780,6 +1781,123 @@ order/quantization, often acceptable.
 | `RLROLL_STRIDE` | distance (ticks) between rollout start ticks | `120` |
 | `RL_POS_TOL` / `RL_VEL_TOL` / `RL_ANGVEL_TOL` / `RL_ROT_TOL` | budget overrides | 0.03 / 0.03 / 0.5 / 0.02 |
 | `RL_PERCENTILE` | gate percentile (0..1); `1.0` = gate on the worst step | `1.0` |
+
+## Which Force Is Wrong (RLLEDGER)
+
+Every other pass here answers *how wrong* the sim is. This one answers *which
+force*, which is a different question and the one that actually tells you what
+to change.
+
+`RigidBody::dbg_tick_impulse_history` records each velocity change the sim makes
+under the name of its source, cleared at the top of every `step_tick` and read
+back afterwards. Sum it and you get an accounting identity:
+
+```text
+v_after - v_before  ==  sum of ledger entries  +  closure
+```
+
+`closure` is the constraint solver, which writes back in aggregate
+(`body.set_lin_vel(solver.lin_vel + external_force_impulse)`) and is the one
+channel that cannot be named. Defining it as the remainder makes contact
+*exactly* measurable without tagging constraints — but only while everything
+else is named, which is what `RLLEDGER=1` checks, as a 2x2 of "did the sim
+report a contact" against "is the closure nonzero":
+
+| | closure == 0 | closure != 0 |
+|---|---|---|
+| **no contact event** | solver idle, fully accounted | **SUSPECT** |
+| **contact event** | contact with no velocity effect | solver contact, measured |
+
+Only SUSPECT matters. Over the suite (470 064 car-ticks) it is 0.13%, and those
+ticks come in pairs with matching magnitudes (391.995 18 / 391.995 12) in the
+match replays — equal-and-opposite car-car contact on two equal-mass bodies,
+i.e. a sustained manifold that emitted no fresh event, not a missing force.
+98.01% close to exactly zero.
+
+The check earns its keep: it found that the flip spin cap edits `accum_ang_vel`
+*after* the flip torque is already in the ledger, so it was clipping angular
+velocity nothing named — 0.257 rad/s mean over 72 ticks on `front_flip` alone.
+Now recorded as `FlipSpinCap`.
+
+### Reading the dump
+
+```bash
+RLLEDGER=2 cargo test -p rocketsim -- --nocapture --test-threads=4     | grep '^LEDGER ' | grep -vE '^LEDGER (2v2|3v3)' > all.txt
+python scripts/ledger_fit.py all.txt              # localisation
+python scripts/ledger_fit.py all.txt --fit        # + per-source regression
+python scripts/ledger_fit.py air.txt --case car_aerial --per-case
+```
+
+**Localisation is the trustworthy output.** The residual is so concentrated that
+its mean is meaningless — in every regime the worst 1% of ticks carry 89–99% of
+the mass:
+
+| regime | channel | median | p99 | max | worst 1% |
+|---|---|---|---|---|---|
+| airborne | linear | 0.0058 UU/s | 5.62 | 571.1 | 98.8% |
+| airborne | angular | 0.000060 rad/s | 0.244 | 19.43 | 93.3% |
+| grounded | linear | 0.0179 UU/s | 32.46 | 1679.0 | 95.6% |
+| grounded | angular | 0.000282 rad/s | 0.506 | 5.13 | 89.5% |
+
+So contact-free per-tick physics is already exact to ~0.006–0.018 UU/s, and the
+entire error budget is a thin tail. The owners of that tail are flips
+(`car_side_flip_*`, `car_sideflip_*`, `car_diagflip_*`), car-car proximity
+(`car_car_long_*`), and `backboard_slope_descend`.
+
+### The regression lies unless the population is isolated
+
+`--fit` returns a per-source scale factor: 1.0 means the force is right. It is
+also the easiest way to fool yourself in this whole harness. Pooled over all
+airborne ticks it reports `~AirTorque` at **0.634** and `Gravity` at **0.940**.
+Both are wrong. Least squares spreads the blame from the 21 catastrophic ticks
+that carry 74% of the angular mass across every coefficient at once.
+
+Three guards, all printed, all of which must pass before a coefficient means
+anything:
+
+- **`GRAVITY CONTROL`** — gravity is exactly known, so its coefficient must come
+  out 1.000. Direct measurement over 1218 pure-gravity free-flight ticks gives
+  RL's own `dv.z` / our `Gravity` entry = **0.99956**. If a fit does not
+  reproduce that, it is misspecified and nothing else in its table is real.
+- **`explained`** — the residual must collapse. Below ~95% a force is missing
+  entirely and the coefficients are absorbing it.
+- **`indep`** — the fraction of a regressor orthogonal to the rest. Gravity and
+  suspension are both near-vertical on a grounded car; boost and engine force
+  are both along forward. Below ~0.05 the coefficient is *arbitrary*, not wrong,
+  and is reported UNIDENTIFIABLE rather than silently fitted.
+
+Run it per-case, where one force dominates, and it works:
+
+| recording | coefficient | residual rad/s |
+|---|---|---|
+| `car_aerial_pitch_up` | `~AirTorque` 0.9998 +/- 0.0000 | 0.05995 -> 0.00002 |
+| `car_aerial_yaw_left` | `~AirTorque` 0.9996 +/- 0.0003 | 0.04380 -> 0.00026 |
+| `car_aerial_roll_left` | `~AirTorque` 0.9999, `~AirDamping` 1.0001 | 0.07450 -> 0.00032 |
+| `car_aerial_damping_pitch` | `~AirDamping` 1.0011 +/- 0.0001 | 0.01706 -> 0.00002 |
+| `car_aerial_damping_roll` | `~AirDamping` 1.0007 +/- 0.0001 | 0.02171 -> 0.00002 |
+| `car_aerial_damping_yaw` | `~AirDamping` 1.0017 +/- 0.0001 | 0.01390 -> 0.00002 |
+
+`car_aerial_pitch_down` reports cond=19 640 and flags damping unidentifiable,
+which is the guard working.
+
+**Result: all six `air_control` constants are already correct.**
+`TORQUE = (130, 95, 400)` and `DAMPING = (30, 20, 50)` are confirmed to within
+0.2%, with the residual falling to 2e-5 rad/s. Air control joins suspension as a
+closed subsystem. This is a door closed, not a win — but this project's largest
+recurring cost has been reopening doors that were never open.
+
+### What the tail actually named
+
+Two concrete defects, both localised rather than guessed:
+
+- **`backboard_slope_descend`, airborne** — at `y ~ 4705, z ~ 65`, RL applies
+  `dv = (0, 162, 535)` while our ledger holds only `Gravity` and `AirControl`.
+  Rocket League is resolving a collision our sim does not detect at all. This is
+  the single biggest owner of airborne linear residual.
+- **`backboard_slope_descend`, grounded** — at `(1017, 4335, 17)` at 1203 UU/s,
+  RL applies `dv = (2.9, -0.8, 0.0)` and we apply `(-14.6, 71.4, 5.9)`. A 71 UU/s
+  lateral kick in one tick where RL has none, with `~WheelsFrictionLat` live —
+  the lateral friction defect, now with a reproducible single-tick witness.
 
 ## C++ RocketSim Comparison (RLCPP)
 
