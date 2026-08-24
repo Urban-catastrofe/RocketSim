@@ -224,6 +224,7 @@ pub fn analyze(recording: &Recording) {
                 let mut s = format!(
                     "LEDGER {} t{} car{} contact={} wheels={} \
                      pos={:.2},{:.2},{:.2} vel={:.3},{:.3},{:.3} spd={:.3} \
+                     fwd={:.4},{:.4},{:.4} up={:.4},{:.4},{:.4} \
                      ctrl={:.3},{:.3},{:.3},{:.3},{},{},{} \
                      gdv={:.5},{:.5},{:.5} sdv={:.5},{:.5},{:.5} \
                      gdw={:.5},{:.5},{:.5} sdw={:.5},{:.5},{:.5} \
@@ -240,6 +241,12 @@ pub fn analyze(recording: &Recording) {
                     v_before.y,
                     v_before.z,
                     v_before.length(),
+                    from_car.phys.rot.rows[0].x,
+                    from_car.phys.rot.rows[0].y,
+                    from_car.phys.rot.rows[0].z,
+                    from_car.phys.rot.rows[2].x,
+                    from_car.phys.rot.rows[2].y,
+                    from_car.phys.rot.rows[2].z,
                     ctrl.throttle,
                     ctrl.steer,
                     ctrl.pitch,

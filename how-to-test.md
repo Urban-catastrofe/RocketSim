@@ -1888,16 +1888,68 @@ recurring cost has been reopening doors that were never open.
 
 ### What the tail actually named
 
-Two concrete defects, both localised rather than guessed:
+**First, a scale warning.** Ranking by *tick count* inside a truncated worst-N
+list is not ranking by mass, and the two disagree badly.
+`backboard_slope_descend` tops the airborne-tick count, and it really is rank 1
+of the airborne contact-free subset at 25.6% - but that subset is only 2.0M of
+the suite's 106.4M total linear error mass. Across all car-ticks the recording
+is **0.93%, rank 14**. Re-rank by mass before calling anything the biggest
+problem.
 
-- **`backboard_slope_descend`, airborne** — at `y ~ 4705, z ~ 65`, RL applies
-  `dv = (0, 162, 535)` while our ledger holds only `Gravity` and `AirControl`.
-  Rocket League is resolving a collision our sim does not detect at all. This is
-  the single biggest owner of airborne linear residual.
-- **`backboard_slope_descend`, grounded** — at `(1017, 4335, 17)` at 1203 UU/s,
-  RL applies `dv = (2.9, -0.8, 0.0)` and we apply `(-14.6, 71.4, 5.9)`. A 71 UU/s
-  lateral kick in one tick where RL has none, with `~WheelsFrictionLat` live —
-  the lateral friction defect, now with a reproducible single-tick witness.
+By mass the suite is, and remains, car-car: `car_car_long_boost_headon` alone is
+**36.4%** of all linear error, and car-car recordings own the top five.
+
+Investigating `backboard_slope_descend` split it into two unrelated defects, one
+real and one in the ground truth.
+
+**Airborne: a collision we never detect.** The car falls nose-down at pitch 90
+degrees, `vz = -1120 UU/s`, and at `t=88` Rocket League arrests it over three
+ticks (`vz -1120 -> -585 -> -195 -> -16`), leaving it standing on its nose at
+`z ~ 69` before it tips over. Our ledger for that tick holds only `Gravity` and
+`AirControl`: no contact at all, on any tick of the recording.
+
+The mechanism is exact. The broadphase *is* swept - `update_aabbs` unions the
+AABB at the current transform with the one at `interp_world_trans`
+(`collision_world.rs:96`), so the pair is found. The narrowphase is not: it only
+keeps contact points within `CONTACT_BREAKING_THRESHOLD = 0.02` BT = **1.0 UU**.
+The nose starts the step ~9 UU above the surface and travels 9.4 UU during it,
+so no contact point is ever generated and the car passes through. The per-tick
+restore then hides the penetration, turning the event into a pure 563 UU/s
+velocity error.
+
+Suite-wide that class - no contact of any kind reported by us, RL changing
+velocity by more than free flight allows - is **73 ticks, 0.097% of ticks but
+3.6% of all linear error mass**, at a median approach speed of 890 UU/s. It
+spans car-world and car-car. Note the overlap with the CCD ruling: that was
+about car-car proximity, and this is the same class of fix reached from the
+car-world side, so it is a judgement call rather than a free win.
+
+**Grounded: the ground truth contradicts itself.** From `t~150` the car drives
+on flat floor with `steer = 0`, `handbrake = 0` and an angular velocity of
+`(0.000, 0.001, 0.000)` - no yaw rate at all - while accelerating 320 -> 1203
+UU/s. Its recorded heading is `(0.966, +0.260)` and its recorded velocity is
+`(0.966, -0.266)`: a **sustained 30 degree slip angle held for 150 ticks that
+Rocket League never corrects**, applying `dv = (2.9, -0.8, 0)` where a real car
+sliding sideways at 1200 UU/s would be violently straightened. Our sim does
+straighten it, spending 61 UU/s per tick of lateral friction, and is scored
+wrong for being right.
+
+Mirroring the recorded heading in y takes this recording's median slip from
+**30.09 degrees to exactly 0.00**. That is not a physical drift.
+
+It is specific to this clip, and that was checked rather than assumed: over
+29 102 grounded upright ticks above 300 UU/s the suite-wide median slip is
+**0.00 degrees** and mirroring helps on only 3.6% of ticks, so there is no
+global sign bug. Of the 22 grounded recordings with a median slip between 5 and
+175 degrees, every other one is explained by handbrake, drifting or a steer of
+1.0 - and `car_doublejump_facing_backward` sits at 89.9 degrees *without*
+mirroring helping, which is what a deliberate facing-vs-motion recording should
+look like. `backboard_slope_descend` is the only clip whose heading is
+inconsistent with both its own trajectory and Rocket League's force response.
+
+Treat its grounded phase as unusable ground truth - the category `validate.rs`
+already rejects broken-jump recordings for - and do not tune wheel friction
+against it.
 
 ## C++ RocketSim Comparison (RLCPP)
 
