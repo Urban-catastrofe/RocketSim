@@ -425,11 +425,130 @@ errors on `boost_contest` and `long_boost_headon` come from.
 This is the next thing to fix in the subsystem. The softening was hiding it, at
 the cost of every clean impact.
 
+### What The `impulse` Bucket Actually Contains
+
+`RLCENSUS` files every step straddling a sub-frame impulse under `impulse`, and
+that bucket is **53.2% of all car error mass** — 6278 steps at a mean of 209.2
+UU/s against a suite mean of 2.49. It looks like the whole game. It is not, and
+the two-step windows say so directly, because they measure the same events with
+φ divided out:
+
+| | steps / events | mean | mass |
+|---|---|---|---|
+| `impulse` bucket, per tick | 6278 steps | 209.23 | 1 313 543 |
+| impulse windows, φ removed | 3351 events | 54.66 | **183 152** |
+
+So **roughly 86% of that bucket is φ** — the unrecorded sub-frame press phase,
+which no amount of physics work can remove. Its physical consequence is bounded
+and one-off: the sim gives the car the full post-impulse velocity for a whole
+tick where RL gave it for only (1−φ), which is at most
+`IMMEDIATE_FORCE / 120` = 2.43 UU of position offset, applied once and neither
+growing nor shrinking.
+
+What is left, measured with `RLIMP=1` (3351 events, whole suite):
+
+| kind | n | mean | mass | share |
+|---|---|---|---|---|
+| bump | 505 | 302.55 | 152 788 | **83.4%** |
+| flip | 1362 | 12.10 | 16 481 | 9.0% |
+| jump | 1466 | 9.46 | 13 874 | 7.6% |
+| double_jump | 18 | 0.49 | 9 | 0.0% |
+
+And restricted to the scripted recordings — the only ground truth this project
+scores the ball on, for the reasons under *Match replay ball records cannot
+grade anything* — the split is even starker:
+
+| kind | scripted n | mean | replay n | mean |
+|---|---|---|---|---|
+| jump | 90 | **2.81** | 1376 | 9.90 |
+| flip | 183 | **3.24** | 1179 | 13.48 |
+| double_jump | 18 | **0.49** | 0 | — |
+| bump | 132 | 320.84 | 368 | 300.02 |
+
+On trustworthy ground truth the button impulses are **effectively exact**:
+median per-axis error is +0.05/+0.00/+0.74 UU/s on a jump and +0.00/+0.00/+0.00
+on a flip, against impulses of 292 and ~500 UU/s. **Car-car bump is 98% of the
+scripted impulse defect and the entire remaining story.** Do not go looking for
+a jump or flip constant here; there is nothing left to find.
+
+Bumps split three ways (scripted, 132 events, mass 42 352 after the demolition
+fix below):
+
+| | n | mass | share | mean |
+|---|---|---|---|---|
+| both fired, magnitude/direction differs | 80 | 19 273 | 45.5% | 240.9 |
+| sim missed the contact entirely | 15 | 12 923 | 30.5% | 861.5 |
+| sim overfired | 18 | 10 080 | 23.8% | 560.0 |
+| both quiet | 19 | 76 | 0.2% | 4.0 |
+
+**Over half of that mass is five events.** `car_car_boost_contest` and
+`car_car_long_boost_headon` at t183–184 carry 23 328 of the 42 352 between them,
+all of them the sim overfiring by ~2.5x (game `dv` 1481, sim 3826). That is the
+deep-interpenetration case already written up above, and it needs continuous
+collision detection, which is ruled out. Excluding it, the remainder is 127
+events at a mean of ~150 UU/s with no systematic direction bias — relative error
+sits flat at 0.5–0.6 across every closing-speed band from 200 to 1600 UU/s,
+while the sim delivers ~0.8x of RL's `dv` in the middle bands and **2.3x** below
+200. Whatever is left is not one constant.
+
+### Rocket League Never Demolishes In This Ground Truth
+
+Across all 440 recordings the observer sets `is_demoed` **exactly zero times**
+(`RLDIAG=1`). That field is dead: what actually marks a demolished car is the
+logger parking it at the arena origin, which `runner::is_car_sentinel` detects,
+and that only ever happens in the match replays.
+
+The four scripted cases written to probe the threshold settle what RL does. In
+`car_car_above_demo_speed` a supersonic car hits a stationary one dead centre at
+**2300 UU/s** — opposite teams by the harness's convention, inside every cone,
+forward-axis speed at the cap — and Rocket League **bumps** it: the victim leaves
+at 2272 UU/s with +346 vz and is still flying 200 ticks later, never parked,
+never teleported. `car_car_head_on_demo`, `car_car_long_accel_to_demo` and
+`car_car_demo_airborne_victim` do the same.
+
+The sim demolished instead. That freezes the victim for the rest of the window
+and produced the **five worst bump events in the suite**, 7.3% of all
+impulse-window error mass:
+
+| case | before | after |
+|---|---|---|
+| `car_car_head_on_demo` car1 t191 | 3115.4 | **2.1** |
+| `car_car_above_demo_speed` car1 t233 | 2300.2 | **0.8** |
+| `car_car_demo_airborne_victim` car1 t233 | 2300.0 | **1.1** |
+| `car_car_long_accel_to_demo` car1 t233 | 2298.5 | **3.3** |
+| `car_car_above_demo_speed` car1 t234 | 1965.7 | **21.2** |
+
+Those are not merely voided — with demolitions off the sim reproduces RL's bump
+to within 0.1% (3115.7 against 3115.4). The bump physics was right all along; a
+demolition was firing on top of it.
+
+**Whether RL's threshold is stricter than ours, or demolitions were simply off
+in the recording session, is not decidable from the recording.** It carries no
+team field at all: `make_arena` assigns Blue/Orange by car-index parity, and
+`carcontact.rs`'s `team_hint` prints that same convention back. Two cars on one
+team would suppress the demolition and keep the bump, which is exactly what is
+observed. Since the sim cannot infer either, `make_arena` sets
+`DemoMode::Disabled`; `RL_DEMOS=on` restores the default for anyone who wants to
+work on the threshold itself.
+
+Effect: impulse-window mass 195 103 → 183 152 (−6.13%), and on scripted
+recordings 55 187 → 43 235 (**−21.66%**). Jump, flip and double-jump windows are
+bit-identical. The per-tick suite mean is **unchanged at 2.4935** — the per-tick
+pass restores state every step, so a demolition never survives into the next one
+— and the gate's passing set is byte-identical at 45.
+
+One asymmetry left open: `cpp_runner::make_cpp_arena` uses
+`Arena::default_standard()`, so the C++ side still demolishes. `RLCPP`
+comparisons on those four cases now flatter us. Nothing else is affected.
+
 ### Known Impulse Defects
 
-1. **Grounded jump reads ~10 UU/s too much vertical velocity.** Every jump
-   window overshoots: game `dv.z` 296.4–299.7 against the sim's 307.8–307.9,
-   consistently. Median jump-window error 12.75 UU/s.
+1. **Grounded jump reads ~2 UU/s too much vertical velocity.** Systematic but
+   small: across 1466 windows the median `dz` error is +1.40 UU/s (scripted
+   only: +0.74, sim 299.5 against the game's 297.5). This entry used to read
+   "~10 UU/s, median window error 12.75" — that was measured before the
+   suspension-travel and flip z-damp fixes and is superseded. The whole scripted
+   jump mass is now 253 UU/s over 90 events; there is nothing worth chasing here.
 2. **Lateral speed is not shed during jump-off while turning.** A turning car
    loses far more sideways velocity than the sim allows
    (`car_jump_after_turning_left`: game `dv.y` −50.9, sim −26.5;
@@ -1582,6 +1701,8 @@ order/quantization, often acceptable.
 | `RLCARC` | `1` to emit one `CARC` row per overlapping car pair: RL's own contact impulse on the closed relative-velocity axis and the sim's; `2` to survey intra-tick `physics_frame` agreement (`CARCSYNC`/`CARCADV`); `3` with `RLCARC_REC=<name> RLCARC_T=<lo>:<hi>` for a raw per-car dump. See `carcontact.rs` | off |
 | `RLTOUCH` | `1` to emit one `TOUCHROW` + `TOUCHSUSP` per landing-touchdown step: RL's own contact impulse and the sim's, with the wheel ray geometry at both ends of the step; `2` to survey the `has_world_contact` field instead. See `touchdown.rs` | off |
 | `RLSUSPDUMP` | `1` to emit one `SUSPROW` per flat-floor step: RL's own suspension impulse and the sim's, with per-wheel compression and rate. See `suspdump.rs` | off |
+| `RLIMP` | `1` to emit one `IMPROW` per impulse-window event: kind, both sides' `dv`, the window error and each side's end speed. The `IMPULSE` rollup prints only the worst three per case, which hides whether a kind's mean is systematic or a handful of outliers. See `impulse_window.rs` | off |
+| `RL_DEMOS` | `on` to re-enable demolitions in the harness arena. They are off by default because the ground truth contains none — see *Rocket League Never Demolishes In This Ground Truth* | off |
 | `RLTHREADS` | worker threads for the per-tick pass | all cores (≤16) |
 | `RLCONT` | `1` to also run the sequential continuous (compounding) pass | off |
 | `RLCPP` | `1` to also replay through the **C++ RocketSim** (`rocketsim_rs` bindings) and report side-by-side. Requires `--features cpp-compare` | off |

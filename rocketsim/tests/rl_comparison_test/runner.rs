@@ -224,6 +224,32 @@ pub fn make_arena(num_cars: usize) -> (Arena, Vec<usize>) {
         };
         arena.set_ball_hit_config(config);
     }
+    // Rocket League never demolishes in this ground truth, so neither may the
+    // sim. Across all 440 recordings the observer sets `is_demoed` exactly zero
+    // times, and the origin-parking that actually marks a demoed car
+    // (`is_car_sentinel`) shows up only in the match replays. The four scripted
+    // cases written to probe the threshold settle it: in
+    // `car_car_above_demo_speed` a supersonic car hits a stationary one dead
+    // centre at 2300 UU/s -- opposite teams, inside every cone, forward-axis
+    // speed at the cap -- and RL *bumps* it. The victim leaves at 2272 UU/s
+    // with +346 vz and is still flying 200 ticks later. `head_on_demo`,
+    // `long_accel_to_demo` and `demo_airborne_victim` do the same.
+    //
+    // The sim demolishes instead, which freezes the victim for the rest of the
+    // window and reads as a ~2300 UU/s error -- the five worst bump events in
+    // the suite, 7.3% of all impulse-window error mass.
+    //
+    // Whether RL's threshold is stricter than ours or demolitions were simply
+    // off in the recording session is *not decidable from the recording*: it
+    // carries no team field at all, and the teams assigned below are the
+    // harness's own index-parity convention, not ground truth. Since the sim
+    // cannot infer either, it is told. `RL_DEMOS=on` restores the default for
+    // anyone investigating the threshold itself.
+    if !matches!(std::env::var("RL_DEMOS").as_deref(), Ok("on")) {
+        let mut mutators = *arena.mutator_config();
+        mutators.demo_mode = rocketsim::DemoMode::Disabled;
+        arena.set_mutator_config(mutators);
+    }
     let car_idcs: Vec<usize> = (0..num_cars)
         .map(|i| {
             let team = if (i % 2) == 0 {
