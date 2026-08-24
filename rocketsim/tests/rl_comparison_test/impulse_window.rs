@@ -141,6 +141,18 @@ pub fn measure_impulses(recording: &Recording, cfg: &HarnessConfig) -> ImpulseRe
                 continue;
             }
             let kind = classify(&recording.ticks[onset].car_records[car], is_bump);
+            // RLIMP_BUMPWIN=3 runs bump windows one step longer. Bullet detects
+            // contact from the positions at the *start* of a step, so a window
+            // that begins with the cars still apart cannot produce the bump
+            // however correct the impulse is -- on `car_car_below_demo_speed`
+            // the restored frame leaves a 15 UU gap that two steps at 1410 UU/s
+            // do not close. This separates "the sim never fires" from "the sim
+            // fires a tick later", which are different defects: only the first
+            // one loses a bot the event.
+            let bump_win_3 = kind == "bump"
+                && matches!(std::env::var("RLIMP_BUMPWIN").as_deref(), Ok("3"))
+                && end + stride < recording.ticks.len()
+                && !has_discontinuity(recording, end, stride);
             let extended_end = end + stride;
             let extend_for_ball_contact = kind == "jump"
                 && extended_end < recording.ticks.len()
@@ -148,7 +160,7 @@ pub fn measure_impulses(recording: &Recording, cfg: &HarnessConfig) -> ImpulseRe
                 && [onset, end, extended_end]
                     .into_iter()
                     .any(|tick| ball_touches_car(recording, tick, car));
-            let measured_end = if extend_for_ball_contact {
+            let measured_end = if extend_for_ball_contact || bump_win_3 {
                 extended_end
             } else {
                 end
@@ -182,7 +194,7 @@ pub fn measure_impulses(recording: &Recording, cfg: &HarnessConfig) -> ImpulseRe
             }
             arena.step_tick();
 
-            if extend_for_ball_contact {
+            if extend_for_ball_contact || bump_win_3 {
                 for (j, &car_idx) in car_idcs.iter().enumerate() {
                     let c: CarControls = recording.ticks[extended_end].car_records[j]
                         .prev_controls

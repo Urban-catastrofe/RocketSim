@@ -491,12 +491,81 @@ sits flat at 0.5–0.6 across every closing-speed band from 200 to 1600 UU/s,
 while the sim delivers ~0.8x of RL's `dv` in the middle bands and **2.3x** below
 200. Whatever is left is not one constant.
 
+### Scoring Bumps The Way A Bot Needs Them
+
+A bot does not need the bump impulse to the UU/s. It needs to know a bump
+happened, and to end up somewhere close enough to recover from. Scored that way
+— an event counts as reactable at `|dv| >= 100 UU/s`, and bump windows run three
+steps (`RLIMP_BUMPWIN=3`, see below) — the subsystem reads:
+
+| | scripted | all recordings |
+|---|---|---|
+| RL bumped and the sim bumped (recall) | **90.8%** | 82.0% |
+| RL was quiet and the sim bumped anyway | **32.0%** | 22.8% |
+| median relative error of the resulting `dv` | **8.9%** | 20.7% |
+| `dv` within 25% of RL's | 72.2% | 55.2% |
+| `dv` within 50% of RL's | 83.1% | 74.3% |
+
+The two-step window under-reports detection: **30% of the bumps it calls
+"missed" simply fire on the third step.** Bullet takes contact from the
+positions at the *start* of a step, so a window that opens with the cars apart
+cannot produce the bump however correct the impulse is — on
+`car_car_below_demo_speed` the restored frame leaves a 15 UU gap that two steps
+at 1410 UU/s do not close. Recall goes 85.5% → 90.8% scripted with the third
+step, and the effect numbers barely move (median 9.3% → 8.9%), so the extra step
+is not buying accuracy by drifting.
+
+**The remaining detection error is one root cause, twice.** The 34 phantom bumps
+are 18 in `car_car_boost_contest` / `car_car_long_boost_headon` at t188 — five
+ticks *after* the real bump — where the sim is still resolving the penetration
+it accumulated at t183 and re-triggers on the way out. The 64 bumps still missed
+after three steps are 56 in match replays. Both are the deep-interpenetration
+case, which needs CCD and is ruled out.
+
+#### Rocket League is deterministic here, to about half a percent
+
+Three recordings turn out to be the same scenario captured separately —
+`car_car_above_demo_speed`, `car_car_demo_airborne_victim` and
+`car_car_long_accel_to_demo` all put a 2300 UU/s car into a stationary one at
+t233 — with car0 starting 5.8 UU apart across the three, so the sub-frame phase
+φ differs. That is a free repeatability experiment:
+
+| | car0 start x | t233 car1 vx (φ-dependent) | t234 car1 vx | t234 car1 vz | t234 car0 vx |
+|---|---|---|---|---|---|
+| `above_demo_speed` | −129.34 | 324.1 | 2272.9 | 346.5 | 1041.0 |
+| `demo_airborne_victim` | −128.57 | 414.4 | 2272.8 | 346.2 | 1041.5 |
+| `long_accel_to_demo` | −123.53 | 1010.6 | 2271.6 | 344.0 | 1044.8 |
+| | | **spread 3.1x** | **0.06%** | **0.7%** | **0.4%** |
+
+On the onset tick the three disagree by a factor of three — that is φ, and it is
+why no per-tick gate can score these steps. One tick later they agree to **0.06%
+on the victim's forward velocity**. Rocket League is not rolling dice on bumps;
+it is applying the same impulse at a different sub-frame instant. So a 90–95%
+similarity target is a meaningful bar, and 8.9% median error is 91% of the way
+there already.
+
 ### Rocket League Never Demolishes In This Ground Truth
 
-Across all 440 recordings the observer sets `is_demoed` **exactly zero times**
-(`RLDIAG=1`). That field is dead: what actually marks a demolished car is the
-logger parking it at the arena origin, which `runner::is_car_sentinel` detects,
-and that only ever happens in the match replays.
+**There is no demolition anywhere in the ground truth, in any form.** All three
+signatures a demolition could leave are absent, checked with `RLDIAG=1` over all
+440 recordings:
+
+1. `is_demoed` is set **exactly zero times**. The field is dead, and any guard
+   written on it alone is a no-op — there are such guards in `impulse_window.rs`
+   and `cpp_runner.rs`, both saved by their `is_car_sentinel` half.
+2. Origin-parking, long assumed to be how the logger records a demolished car,
+   happens **42 times and every one is on the recording's own last tick**, all
+   cars at once. That is logger teardown. The comments claiming otherwise on
+   `is_car_sentinel` and in `cpp_runner.rs` are corrected.
+3. A car frozen at one exact pose for half a respawn (180+ ticks) and then
+   teleporting — the shape an unlogged 3 s respawn would take — occurs **zero
+   times**.
+
+**So demolition detection cannot be scored at all against these recordings**, and
+any change to the demo trigger is unfalsifiable here. The only demo evidence the
+suite carries is the four negative data points below. Calibrating the trigger
+needs a recording that actually contains a demolition: opposite teams, demos
+enabled, attacker supersonic.
 
 The four scripted cases written to probe the threshold settle what RL does. In
 `car_car_above_demo_speed` a supersonic car hits a stationary one dead centre at
@@ -1702,6 +1771,7 @@ order/quantization, often acceptable.
 | `RLTOUCH` | `1` to emit one `TOUCHROW` + `TOUCHSUSP` per landing-touchdown step: RL's own contact impulse and the sim's, with the wheel ray geometry at both ends of the step; `2` to survey the `has_world_contact` field instead. See `touchdown.rs` | off |
 | `RLSUSPDUMP` | `1` to emit one `SUSPROW` per flat-floor step: RL's own suspension impulse and the sim's, with per-wheel compression and rate. See `suspdump.rs` | off |
 | `RLIMP` | `1` to emit one `IMPROW` per impulse-window event: kind, both sides' `dv`, the window error and each side's end speed. The `IMPULSE` rollup prints only the worst three per case, which hides whether a kind's mean is systematic or a handful of outliers. See `impulse_window.rs` | off |
+| `RLIMP_BUMPWIN` | `3` to run bump windows one step longer. Bullet detects contact from the positions at the *start* of a step, so a two-step window that begins with the cars apart cannot produce the bump at all; this separates "never fires" from "fires a tick later" | `2` |
 | `RL_DEMOS` | `on` to re-enable demolitions in the harness arena. They are off by default because the ground truth contains none — see *Rocket League Never Demolishes In This Ground Truth* | off |
 | `RLTHREADS` | worker threads for the per-tick pass | all cores (≤16) |
 | `RLCONT` | `1` to also run the sequential continuous (compounding) pass | off |

@@ -118,9 +118,9 @@ fn set_cpp_state_to_record_tick_impl(
         let rec = &tick.car_records[i];
         let mut cs = arena.pin_mut().get_car(car_id);
 
-        // The logger parks demoed cars at the origin WITHOUT setting
-        // is_demoed (and the recording keeps them is_demoed=true while parked
-        // there). Either way they are absent from real play; restoring several
+        // The logger parks absent cars at the origin (see is_car_sentinel --
+        // these are logger teardown ticks, not demolitions; the ground truth
+        // has none). They are absent from real play; restoring several
         // of them into the same origin pose makes bullet's solver produce NaN
         // (fully-overlapping rigid bodies). Park them far below the arena,
         // demoed with a huge respawn timer, so they never disturb the live

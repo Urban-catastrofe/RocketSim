@@ -28,17 +28,21 @@ pub fn is_ball_sentinel(phys: &PhysRecord) -> bool {
     phys.pos.z < -1000.0
 }
 
-/// The logger parks a demoed car at the origin (0,0,0) with zero velocity but
-/// WITHOUT setting `is_demoed`. A real car centre cannot sit below ~z=17 on
+/// The logger parks an absent car at the origin (0,0,0) with zero velocity.
+///
+/// This was long assumed to be how a demolished car is recorded, but it is
+/// not: `RLDIAG=1` over all 440 recordings finds 42 parkings and every one
+/// is on the recording's own last tick, all cars at once -- logger teardown,
+/// not a demolition. The ground truth contains no demolition in any form
+/// (`is_demoed` never set, no origin-parking mid-recording, no frozen
+/// respawn span). The guard is still needed for those teardown ticks. A real car centre cannot sit below ~z=17 on
 /// flat ground (its hitbox keeps it above the floor), so a near-origin position
 /// with zero velocity marks a parked/demoed car — the sim restoring that pose
 /// and running full physics fabricates a huge divergence (e.g. the ground
 /// shoving the embedded hitbox upward at ~158 UU/s).
 pub fn is_car_sentinel(phys: &PhysRecord) -> bool {
-    // The logger parks a demoed car at the exact origin with zero velocity and
-    // rotation. A real car centre never sits at the arena origin at rest (the
-    // floor keeps it at z~17), so an origin-parked, inert pose marks a parked
-    // car — the sim restoring that pose and running full physics fabricates a
+    // A real car centre never sits at the arena origin at rest (the floor keeps
+    // it at z~17), so an origin-parked, inert pose marks an absent car — the sim restoring that pose and running full physics fabricates a
     // huge divergence (the ground shoves the embedded hitbox upward).
     let v = phys.lin_vel;
     let w = phys.ang_vel;
