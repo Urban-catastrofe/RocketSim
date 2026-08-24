@@ -25,4 +25,17 @@ pub const ERP_2: f32 = 0.8;
 pub const SPLIT_IMPULSE_PENETRATION_THRESHOLD: f32 = 1e30;
 pub const SPLIT_IMPULSE_TURN_ERP: f32 = 0.1;
 pub const WARMSTARTING_FACTOR: f32 = 0.85;
-pub const RESTITUTION_VELOCITY_THRESHOLD: f32 = 1.0;
+/// Below this relative normal speed a contact gets zero restitution.
+///
+/// This is Bullet's `m_restitutionVelocityThreshold`, and 0.2 is the default in
+/// the bullet3-3.24 that RocketSim vendors (`btContactSolverInfo.h`). RocketSim
+/// overrides exactly two solver-info values -- `m_splitImpulsePenetrationThreshold`
+/// and `m_erp2` -- and this is not one of them, so 0.2 is what the C++ engine runs.
+///
+/// It was briefly raised to 1.0 on the claim that 1.0 was Bullet's default; it is
+/// not. The port is BT-native, so the constant is BT/s: 0.2 is 10 uu/s and 1.0 is
+/// 50 uu/s, and at 1.0 every contact closing between those speeds lost its bounce
+/// -- the settling/rolling regime. Restoring 0.2 measured monotonically better on
+/// a 0.2/0.4/0.6/1.0 sweep (ball vel 4.1899 -> 4.1776, ball pos 0.0378 -> 0.0377,
+/// car suite mean 2.4943 -> 2.4935) with the gate's pass/fail set unchanged.
+pub const RESTITUTION_VELOCITY_THRESHOLD: f32 = 0.2;
