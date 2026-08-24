@@ -1339,6 +1339,62 @@ Counts move a few percent between runs because parallel test threads drop about
 2% of captured stdout lines; the ratios above are stable and the exact zeroes
 stay exact.
 
+## Merging the v3-rust Line Back In
+
+Measured 2026-08-24. The branch had diverged into two lines that turned out to
+be almost disjoint: everything under `src/` had moved on in `v3-rust` (BVH4, the
+module reorg, integer `jump_ticks`, the dodge spin profile, lateral friction
+along the raw axle, restitution threshold 1.0, and a one-shot car-ball
+time-of-impact solve), while the local line was all measurement -- the error
+census, the touchdown/carcontact/flipdamp passes, the ball census, and the
+ground-truth voids. Nothing had to be thrown away.
+
+Both lines had independently found the wheel pushback ERP. It is applied once,
+not twice: `RAY_PUSHBACK_ERP` and `WHEEL_PUSHBACK_ERP` are the same constant
+under two names and the merge kept one at 0.1.
+
+The merge added 16 recordings, so the headline totals are not comparable across
+it. Restricted to the 280 cases and 461 340 steps both trees measure, on an
+`RLCENSUS=1` run each:
+
+| | steps | suite mean |
+|---|---|---|
+| pre-merge (`ef16d89`) | 461 340 | 2.5953 |
+| merged (`b1c5079`) | 461 340 | **2.4627** (-5.11%) |
+
+The pre-merge tree reproduces 2.5953 to four decimals, which is the check that
+the two runs are measuring the same thing.
+
+Where the -5.11% comes from, by bucket mean on those common cases:
+
+| bucket | pre | merged | |
+|---|---|---|---|
+| `liftoff` | 2.911 | 2.132 | -26.8% |
+| `drive_partial` | 6.006 | 5.032 | -16.2% |
+| `wall_ceiling` | 6.299 | 5.398 | -14.3% |
+| `wheel_transition` | 14.057 | 12.058 | -14.2% |
+| `drive_handbrake` | 1.728 | 1.615 | -6.5% |
+| `drive_coast` | 1.810 | 1.716 | -5.2% |
+| `touchdown` | 16.930 | 16.130 | -4.7% |
+| `air_free` | 1.729 | 1.734 | +0.3% |
+| `air_boost` | 2.255 | 2.270 | +0.7% |
+
+The gain is concentrated in wheel-contact and transitional-contact buckets,
+which is what the `v3-rust` side was working on, and the two airborne buckets
+give back a fraction of a percent. The match replays move most of the mass
+(`3v3` 2.539 -> 2.343, `2v2_match` 2.387 -> 2.226) simply because they hold the
+most steps. Gate unchanged at **45 passing**.
+
+Over the full merged recording set the suite mean is **2.4943** over 463 786
+steps in 296 cases, and `wall_ceiling` is no longer the second-heaviest bucket
+by mean -- `ball_contact` (15.24) and `touchdown` (16.13) are now the worst
+per-step, with `air_free` still owning the most mass at 20.0%.
+
+The flip z-damp gate survived the merge unchanged. It reads the *recording's*
+`ang_vel`, not the sim's, so the new `flip::SPIN_CAP_X`/`SPIN_CAP_Y` do not
+touch its calibration; only its constant moved, from `flip::TORQUE_X`/`TORQUE_Y`
+to the consolidated `flip::TORQUE`.
+
 ## The Accuracy Bar
 
 A case **passes** when no single simulated step diverges from the recording by
