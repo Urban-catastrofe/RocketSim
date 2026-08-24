@@ -11,3 +11,5 @@ heaptrack*
 # Anything starting with 3 underscores
 ___*
 *.blend1
+__pycache__/
+*.pyc
