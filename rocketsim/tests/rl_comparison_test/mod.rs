@@ -110,6 +110,14 @@ fn test_recording(recording: &Recording) {
             ballcensus::bounce_study(recording);
             return;
         }
+        Ok("5") => {
+            ballcensus::point_dump(recording);
+            return;
+        }
+        Ok("6") => {
+            ballcensus::response_study(recording);
+            return;
+        }
         Ok(_) => {
             ballcensus::analyze(recording);
             return;

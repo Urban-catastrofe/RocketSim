@@ -52,6 +52,8 @@ const SQRT2: f32 = std::f32::consts::SQRT_2;
 /// own recorded position change before the step is called self-inconsistent.
 /// Generous: the channels agree to well under 1 uu/s wherever they agree at all.
 const SELF_CONSISTENCY_TOL: f32 = 5.0;
+/// Gravity's contribution to one tick of velocity, 650 / 120.
+const GRAV_DV: f32 = 650.0 / 120.0;
 /// Octane hitbox half-extents and centre offset, as in `census.rs`.
 const HITBOX_HALF: Vec3A = Vec3A::new(120.507 / 2.0, 86.6994 / 2.0, 38.6591 / 2.0);
 const HITBOX_OFFSET: Vec3A = Vec3A::new(13.8757, 0.0, 20.755);
@@ -137,6 +139,284 @@ fn normal_class(n: Vec3A) -> &'static str {
         return "vert_oblique";
     }
     "oblique"
+}
+
+/// `RLBALL=6`: how the sim's ball-world contact response compares with Rocket
+/// League's, banded by how far the ball actually is from the surface.
+///
+/// The crossbar dump raised a specific suspicion. `convert_contact_special`
+/// takes `distance = total_dist / num_special_collisions` where each term is
+/// `rel_pos.length()` -- the distance from the ball *centre* to the contact
+/// point, i.e. about one ball radius. So `penetration` is always positive, the
+/// positional term is always zero, and the velocity term always runs at full
+/// strength. Bullet calls that a speculative contact and it is deliberate, but
+/// it means a ball still separated from a surface has its entire approach
+/// velocity cancelled. At the crossbar the gap was +0.25 UU and the sim removed
+/// 1847 uu/s where RL removed 241.
+///
+/// This banding is the test: if the over-reaction is speculative contact, the
+/// sim/RL impulse ratio blows up as the gap goes positive and sits near 1 where
+/// the ball genuinely overlaps.
+pub fn response_study(recording: &Recording) {
+    /// A car this close means the impulse is not a clean world contact.
+    const CAR_CLEAR: f32 = 500.0;
+
+    let num_cars = recording.info.num_cars as usize;
+    let stride = recording.stride;
+    let (mut arena, car_idcs) = make_arena(num_cars);
+    let mut controls_buf: Vec<CarControls> = vec![CarControls::DEFAULT; num_cars];
+
+    let last = recording.ticks.len().saturating_sub(stride + 1);
+    for i in (0..=last).step_by(stride) {
+        let discontinuous = has_discontinuity(recording, i, stride);
+        let from_tick = &recording.ticks[i];
+        let to_tick = &recording.ticks[i + stride];
+        for (j, car_record) in to_tick.car_records.iter().enumerate() {
+            controls_buf[j] = car_record.prev_controls.into();
+        }
+        set_state_to_record_tick(&mut arena, &car_idcs, from_tick, &controls_buf);
+
+        let v_before = arena.get_ball_state().phys.vel;
+        let mut pts: Vec<(Vec3A, Vec3A)> = Vec::new();
+        for ev in arena.step_tick() {
+            if let ArenaEvent::BallHitWorld(e) = ev {
+                pts.push((e.contact_point, e.contact_normal));
+            }
+        }
+        if discontinuous || pts.is_empty() {
+            continue;
+        }
+        let from = &from_tick.ball_record;
+        let to = &to_tick.ball_record;
+        if is_sentinel(from) || is_sentinel(to) {
+            continue;
+        }
+        let p = Vec3A::from(from.pos);
+        let car_near = from_tick
+            .car_records
+            .iter()
+            .chain(to_tick.car_records.iter())
+            .filter(|c| !c.is_demoed && !is_car_sentinel(&c.phys))
+            .any(|c| hitbox_dist(p, &c.phys) - BALL_RADIUS < CAR_CLEAR);
+        if car_near {
+            continue;
+        }
+
+        // Closest approach of the ball surface to any contact point the sim
+        // produced. Positive means the ball had not reached the surface.
+        let gap = pts
+            .iter()
+            .map(|&(pt, _)| (pt - p).length() - BALL_RADIUS)
+            .fold(f32::INFINITY, f32::min);
+        let mean_nrm = pts
+            .iter()
+            .fold(Vec3A::ZERO, |a, &(_, n)| a + n)
+            .normalize_or_zero();
+        // Distinct normals among the points, so duplicate-driven weighting is
+        // visible: the crossbar reported the same point eight times.
+        let mut distinct = 0usize;
+        let mut seen: Vec<Vec3A> = Vec::new();
+        for &(_, n) in &pts {
+            if !seen.iter().any(|&s| (s - n).length() < 1e-4) {
+                seen.push(n);
+                distinct += 1;
+            }
+        }
+
+        // Candidate normals for the single contact `convert_contact_special`
+        // builds. The current rule is the plain mean, which at the goal post
+        // base averages 58 distinct normals into a direction 35 degrees off the
+        // impulse RL actually applied. These are the alternatives worth testing
+        // against RL's own impulse direction.
+        let per_point_gap =
+            |pt: Vec3A| -> f32 { (pt - p).length() - BALL_RADIUS };
+        // Deepest contact: the most negative signed gap.
+        let deepest = pts
+            .iter()
+            .min_by(|a, b| {
+                per_point_gap(a.0)
+                    .partial_cmp(&per_point_gap(b.0))
+                    .unwrap()
+            })
+            .map_or(Vec3A::ZERO, |&(_, n)| n);
+        // The surface the ball is driving into hardest.
+        let most_opposed = pts
+            .iter()
+            .min_by(|a, b| {
+                v_before
+                    .dot(a.1)
+                    .partial_cmp(&v_before.dot(b.1))
+                    .unwrap()
+            })
+            .map_or(Vec3A::ZERO, |&(_, n)| n);
+        // The mean over distinct normals, so duplicate points stop acting as
+        // weights: at the crossbar one point was reported eight times.
+        let mut uniq: Vec<Vec3A> = Vec::new();
+        for &(_, n) in &pts {
+            if !uniq.iter().any(|&u| (u - n).length() < 1e-4) {
+                uniq.push(n);
+            }
+        }
+        let mean_distinct = uniq
+            .iter()
+            .fold(Vec3A::ZERO, |a, &b| a + b)
+            .normalize_or_zero();
+
+        let sim_dv = arena.get_ball_state().phys.vel - v_before;
+        let rl_dv = Vec3A::from(to.lin_vel) - Vec3A::from(from.lin_vel);
+        // Gravity is in both, so remove it before comparing impulses.
+        let g = Vec3A::new(0.0, 0.0, -GRAV_DV);
+        let sim_imp = sim_dv - g;
+        let rl_imp = rl_dv - g;
+        let approach = v_before.dot(mean_nrm);
+        println!(
+            "BALLRESP {} t{i} np={} distinct={distinct} gap={gap:.2} class={} approach={approach:.1} simimp={:.1} rlimp={:.1} ratio={:.3} angle={:.1} nrm=({:.3},{:.3},{:.3}) pos=({:.0},{:.0},{:.0})",
+            recording.name,
+            pts.len(),
+            normal_class(mean_nrm),
+            sim_imp.length(),
+            rl_imp.length(),
+            if rl_imp.length() > 1.0 {
+                sim_imp.length() / rl_imp.length()
+            } else {
+                f32::NAN
+            },
+            if sim_imp.length() > 1.0 && rl_imp.length() > 1.0 {
+                sim_imp
+                    .normalize()
+                    .dot(rl_imp.normalize())
+                    .clamp(-1.0, 1.0)
+                    .acos()
+                    .to_degrees()
+            } else {
+                f32::NAN
+            },
+            mean_nrm.x,
+            mean_nrm.y,
+            mean_nrm.z,
+            p.x,
+            p.y,
+            p.z,
+        );
+        // Angle from RL's own impulse direction to each candidate normal, so the
+        // selection rule can be chosen by measurement rather than by taste.
+        if rl_imp.length() > 50.0 && uniq.len() > 1 {
+            let ang = |n: Vec3A| -> f32 {
+                if n.length() < 1e-6 {
+                    return f32::NAN;
+                }
+                rl_imp
+                    .normalize()
+                    .dot(n.normalize())
+                    .clamp(-1.0, 1.0)
+                    .acos()
+                    .to_degrees()
+            };
+            println!(
+                "BALLNRM {} t{i} nuniq={} mean={:.1} meandistinct={:.1} deepest={:.1} opposed={:.1} rlimp={:.0}",
+                recording.name,
+                uniq.len(),
+                ang(mean_nrm),
+                ang(mean_distinct),
+                ang(deepest),
+                ang(most_opposed),
+                rl_imp.length(),
+            );
+        }
+    }
+}
+
+/// `RLBALL=5`: print every individual ball-world contact point the sim produces,
+/// for `RLBALL_REC` over the tick range `RLBALL_T=lo:hi`.
+///
+/// Ball-vs-world does not go through Bullet's contact solver at all. The
+/// contact-added callback marks these points `is_special`, and
+/// `SeqImpulseConstraintSolver::convert_contact_special` collapses *every* point
+/// into a single contact whose normal is the plain mean `total_normal /
+/// num_special_collisions`. So when the ball spans several surfaces the impulse
+/// is driven by an average direction that need not be any real surface's normal,
+/// and this dump is what shows which surfaces went into that average.
+pub fn point_dump(recording: &Recording) {
+    let want = std::env::var("RLBALL_REC").unwrap_or_default();
+    if !want.is_empty() && recording.name != want {
+        return;
+    }
+    let (lo, hi) = std::env::var("RLBALL_T")
+        .ok()
+        .and_then(|v| {
+            let (a, b) = v.split_once(':')?;
+            Some((a.parse::<usize>().ok()?, b.parse::<usize>().ok()?))
+        })
+        .unwrap_or((0, usize::MAX));
+
+    let num_cars = recording.info.num_cars as usize;
+    let stride = recording.stride;
+    let (mut arena, car_idcs) = make_arena(num_cars);
+    let mut controls_buf: Vec<CarControls> = vec![CarControls::DEFAULT; num_cars];
+
+    let last = recording.ticks.len().saturating_sub(stride + 1);
+    for i in (0..=last).step_by(stride) {
+        let from_tick = &recording.ticks[i];
+        for (j, car_record) in recording.ticks[i + stride].car_records.iter().enumerate() {
+            controls_buf[j] = car_record.prev_controls.into();
+        }
+        set_state_to_record_tick(&mut arena, &car_idcs, from_tick, &controls_buf);
+
+        let mut pts: Vec<(Vec3A, Vec3A)> = Vec::new();
+        for ev in arena.step_tick() {
+            if let ArenaEvent::BallHitWorld(e) = ev {
+                pts.push((e.contact_point, e.contact_normal));
+            }
+        }
+        if i < lo || i > hi || pts.is_empty() {
+            continue;
+        }
+
+        let from = &from_tick.ball_record;
+        let to = &recording.ticks[i + stride].ball_record;
+        let mean = pts
+            .iter()
+            .fold(Vec3A::ZERO, |a, &(_, n)| a + n)
+            / pts.len() as f32;
+        let rl_dv = Vec3A::from(to.lin_vel) - Vec3A::from(from.lin_vel);
+        println!(
+            "BALLPT {} t{i} np={} meannrm=({:.3},{:.3},{:.3}) |meannrm|={:.3} rldv=({:.1},{:.1},{:.1}) rldir=({:.3},{:.3},{:.3}) ballpos=({:.1},{:.1},{:.1})",
+            recording.name,
+            pts.len(),
+            mean.x,
+            mean.y,
+            mean.z,
+            mean.length(),
+            rl_dv.x,
+            rl_dv.y,
+            rl_dv.z,
+            rl_dv.normalize_or_zero().x,
+            rl_dv.normalize_or_zero().y,
+            rl_dv.normalize_or_zero().z,
+            from.pos.x,
+            from.pos.y,
+            from.pos.z,
+        );
+        for (k, (pt, nrm)) in pts.iter().enumerate() {
+            // Where the point sits relative to the ball centre, in radii: a real
+            // surface contact sits one radius out along the inward normal.
+            let rel = *pt - Vec3A::from(from.pos);
+            println!(
+                "BALLPT   #{k} nrm=({:.3},{:.3},{:.3}) pt=({:.1},{:.1},{:.1}) rel=({:.1},{:.1},{:.1}) |rel|={:.1} class={}",
+                nrm.x,
+                nrm.y,
+                nrm.z,
+                pt.x,
+                pt.y,
+                pt.z,
+                rel.x,
+                rel.y,
+                rel.z,
+                rel.length(),
+                normal_class(*nrm),
+            );
+        }
+    }
 }
 
 /// `RLBALL=4`: is a missed bounce a wrong impulse, or just a late one?
