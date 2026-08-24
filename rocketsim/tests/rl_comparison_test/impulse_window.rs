@@ -71,6 +71,14 @@ pub struct ImpulseEvent {
     pub sim_dvel: Vec3A,
     pub vel_err: f32,
     pub pos_err: f32,
+    /// Speed of each side at the end of the window, so a demo mismatch (one
+    /// side parked at spawn while the other is still moving) is separable from
+    /// an impulse-magnitude error.
+    pub game_end_speed: f32,
+    pub sim_end_speed: f32,
+    /// The sim demoed inside the window. The recording's end state is checked
+    /// before measuring, so this can only be a *disagreement*.
+    pub sim_demoed: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -197,6 +205,9 @@ pub fn measure_impulses(recording: &Recording, cfg: &HarnessConfig) -> ImpulseRe
                 sim_dvel: sim.phys.vel - v0,
                 vel_err: (sim.phys.vel - v_end).length(),
                 pos_err: (sim.phys.pos - p_end).length(),
+                game_end_speed: v_end.length(),
+                sim_end_speed: sim.phys.vel.length(),
+                sim_demoed: sim.is_demoed,
             });
         }
     }
@@ -234,6 +245,34 @@ pub fn impulse_lines(report: &ImpulseReport, cfg: &HarnessConfig) -> Vec<String>
             "[{}] IMPULSE {kind:11} n={n:3} mean={mean:8.4} max={:8.4}@t{} over={}/{} budget={budget:.3}",
             report.name, worst.vel_err, worst.onset_tick, over, n,
         ));
+    }
+
+    // RLIMP=1: one machine-readable row per event, so the error *distribution*
+    // can be read instead of the worst three. The rollup above hides whether a
+    // kind's mean comes from every event or from a handful of outliers.
+    if matches!(std::env::var("RLIMP").as_deref(), Ok("1") | Ok("true")) {
+        for e in &report.events {
+            lines.push(format!(
+                "IMPROW {} car{} {} t{} gdv={:.4},{:.4},{:.4} sdv={:.4},{:.4},{:.4}                  gmag={:.4} smag={:.4} vel_err={:.4} pos_err={:.4}                  gspd={:.4} sspd={:.4} sdemo={}",
+                report.name,
+                e.car,
+                e.kind,
+                e.onset_tick,
+                e.game_dvel.x,
+                e.game_dvel.y,
+                e.game_dvel.z,
+                e.sim_dvel.x,
+                e.sim_dvel.y,
+                e.sim_dvel.z,
+                e.game_dvel.length(),
+                e.sim_dvel.length(),
+                e.vel_err,
+                e.pos_err,
+                e.game_end_speed,
+                e.sim_end_speed,
+                u8::from(e.sim_demoed),
+            ));
+        }
     }
 
     let mut worst: Vec<&ImpulseEvent> = report.events.iter().collect();
