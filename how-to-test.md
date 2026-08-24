@@ -2208,6 +2208,66 @@ is unchanged and the ball's 463 gate violations are unchanged -- 97 steps do not
 move a p99 -- so this is a metric-honesty fix, not a gate win. `RLKEEPDUP=1`
 keeps them in for re-measurement.
 
+#### The ball finally gets a positional push-out (-1.86% ball position)
+
+The ball was the one body in the arena with no split-impulse push-out, and the
+reason was a single overloaded variable. `add_special_collision` accumulates
+`total_dist += rel_pos.length()` -- the distance from the ball centre to each
+contact point, i.e. about one radius -- and `convert_contact_special` then uses
+the mean of that for two different jobs: the lever arm `rel_pos1 = normal *
+-distance`, where a radius is correct, and `let penetration = distance`, where it
+is not. A radius is never negative, so `positional_error` took the
+`penetration > 0.0 -> 0.0` branch on every contact the ball ever had and
+`rhs_penetration` was identically zero.
+
+C++ has the same conflation in `convertContactSpecial`; it gets a push-out anyway
+from the per-point constraints it *also* builds, which our port `continue`s past.
+So the channel exists in C++ and did not exist at all on our side.
+
+The fix carries the points' own `distance_1` alongside the radius and uses it for
+the penetration. It is a **position-only** change by construction: ball velocity
+comes out bit-identical across all 439 recordings, as does every car metric.
+
+**A recovery cap is required.** Uncapped, this reproduces a pathology rather than
+fixing one: `ball_corner_exit_low` and `ball_corner_exit_high` start the ball
+about **75 UU inside the corner mesh** with Rocket League applying no impulse at
+all, and a 75 UU penetration at `ERP_2 = 0.8` moves the ball 60 UU in a single
+tick. Their ball position rms goes 0.96 -> 49.26 and 1.36 -> 34.73. Those are the
+same two recordings [[ball-position-is-worse-than-cpp]] records as blowing up in
+**C++** at 45.8 and 45.2 UU per step -- so this now *explains* a blow-up that had
+only ever been noted.
+
+The cap is that penetration recovery may only undo what the step could have
+created: `|v| * dt + CONTACT_BREAKING_THRESHOLD`. The narrowphase only generates
+points within that threshold of the surface, so a depth far beyond one step of
+travel predates the step -- the body reached the solver already embedded, which
+in a restore-every-tick harness is *every* tick. Anything deeper is still
+recovered, over several ticks instead of one, which is what `ERP_2 < 1` already
+does. The cap touches nothing but those two recordings; every other case is
+bit-identical capped or not.
+
+Scripted recordings, excluding the corner-exit pair as every ball comparison
+must:
+
+| measure | before | after |
+|---|---|---|
+| per-step ball pos rms | 0.5627 UU | **0.5522** (-1.86%) |
+| per-step ball vel rms | 68.7863 uu/s | 68.7863 (unchanged) |
+| 0.5 s rollout, ball pos @ t60 | 62.1911 UU | **61.8147** (-0.61%) |
+| 0.5 s rollout, ball vel @ t60 | 169.1158 uu/s | **165.5797** (-2.09%) |
+
+75 recordings improve and 34 get worse; the rollout improves at every horizon
+measured (t1 -0.73%, t15 -1.20%, t30 -0.51%, t60 -0.61% on position). Gate pass
+set unchanged.
+
+**What it costs.** `ball_corner_exit_high` and `ball_corner_exit_low` still go
+0.96 -> 4.09 and 1.36 -> 3.85. That is the cap working -- 12x better than
+uncapped -- but any recovery mechanism must move a ball that starts embedded.
+Whether the recording is wrong or our corner mesh is is still open: at
+`(3593, 4493, 316)` the ball centre is 22 UU past the nominal chamfer plane and
+the sim's own contact points sit 16 UU from its centre, which is not a state a
+free-running sim could reach. Worth settling before trusting either recording.
+
 ### The Flip Z-Damp Was Firing On Almost Everything (-13.4%, RLFLIP)
 
 The largest single win so far. `RLCENSUS=10` bands every bucket by the recorded

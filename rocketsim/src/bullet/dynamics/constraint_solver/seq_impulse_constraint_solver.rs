@@ -4,7 +4,9 @@ use super::{contact_solver_info, solver_body::SolverBody, solver_constraint::Sol
 use crate::bullet::{
     collision::narrowphase::{
         manifold_point::ManifoldPoint,
-        persistent_manifold::{ContactAddedCallback, ContactSolveInfo, PersistentManifold},
+        persistent_manifold::{
+            CONTACT_BREAKING_THRESHOLD, ContactAddedCallback, ContactSolveInfo, PersistentManifold,
+        },
     },
     dynamics::rigid_body::{CollisionFlags, RigidBody},
     linear_math::{integrate_trans, integrate_trans_no_rot, plane_space_1},
@@ -14,7 +16,24 @@ struct SpecialResolveInfo {
     pub obj_idx: usize,
     pub num_special_collisions: u16,
     pub total_normal: Vec3A,
+    /// Sum of `rel_pos.length()` over the points: the distance from the body's
+    /// centre to each contact point, i.e. about one ball radius. This is the
+    /// lever arm, *not* a penetration depth -- see [`Self::total_penetration`].
     pub total_dist: f32,
+    /// Sum of the points' own `distance_1`: the signed gap to the surface,
+    /// negative when overlapping.
+    ///
+    /// Kept separate from `total_dist` because the two are different quantities
+    /// that the aggregated constraint needs for different jobs. C++'s
+    /// `convertContactSpecial` uses `total_dist` for both, which makes the
+    /// constraint's `m_distance1` a positive radius, so `positional_error` takes
+    /// the `penetration > 0` branch every single time and `m_rhsPenetration` is
+    /// identically zero -- the ball is the one body in the arena that never gets
+    /// a split-impulse push-out. C++ still gets one from the per-point
+    /// constraints it also builds (the split-impulse loop has no `m_isSpecial`
+    /// check); our port `continue`s before creating those, so without this the
+    /// channel does not exist at all on our side.
+    pub total_penetration: f32,
     pub restitution: f32,
     pub friction: f32,
 }
@@ -25,6 +44,7 @@ impl SpecialResolveInfo {
         num_special_collisions: 0,
         total_normal: Vec3A::ZERO,
         total_dist: 0.0,
+        total_penetration: 0.0,
         restitution: 0.0,
         friction: 0.0,
     };
@@ -45,6 +65,7 @@ impl SpecialResolveInfo {
                 self.restitution = cp.combined_restitution;
                 self.total_normal += cp.normal_world_on_b;
                 self.total_dist += rel_pos.length();
+                self.total_penetration += cp.distance_1;
             }
         }
     }
@@ -242,6 +263,9 @@ impl SeqImpulseConstraintSolver {
         let num_collisions = f32::from(sri.num_special_collisions);
         let distance = sri.total_dist / num_collisions;
         let normal_world_on_b = sri.total_normal / num_collisions;
+        // The mean signed gap to the surface. `distance` above is the mean lever
+        // arm and cannot serve as this: it is a length, so it is never negative.
+        let mean_penetration = sri.total_penetration / num_collisions;
 
         let friction_idx = self.tmp_solver_contact_constraint_pool.len();
 
@@ -277,7 +301,21 @@ impl SeqImpulseConstraintSolver {
 
         let (contact_normal_1, rel_pos1_cross_normal) = (normal_world_on_b, torque_axis_0);
 
-        let penetration = distance;
+        // Penetration recovery may only undo what this step could have created.
+        // The narrowphase only generates points within `CONTACT_BREAKING_THRESHOLD`
+        // of the surface, so a depth far beyond one step of travel was not
+        // produced by the step: the body reached the solver already embedded, and
+        // pushing it all the way out in one tick teleports it. That is not a
+        // hypothetical -- `ball_corner_exit_low` and `ball_corner_exit_high` start
+        // the ball ~75 UU inside the corner mesh with Rocket League applying no
+        // impulse at all, and an uncapped recovery moves it 60 UU in a tick. It is
+        // also what makes C++ blow up on exactly those two recordings, at 45.8 and
+        // 45.2 UU per step against our 0.96 and 1.36.
+        //
+        // Anything deeper than the cap is still recovered, just over several ticks
+        // rather than one, which is the same thing `ERP_2 < 1` already does.
+        let max_recover = body.lin_vel.length() * time_step + CONTACT_BREAKING_THRESHOLD;
+        let penetration = mean_penetration.max(-max_recover);
 
         let vel = body.get_vel_in_local_point(rel_pos1);
         let rel_vel = normal_world_on_b.dot(vel);
