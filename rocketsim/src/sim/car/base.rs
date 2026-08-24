@@ -429,6 +429,7 @@ impl Car {
                     true,
                 );
 
+                let cap_before = rb.accum_ang_vel;
                 let proj_x = rb.ang_vel.x + rb.accum_ang_vel.x;
                 if proj_x > flip::SPIN_CAP_X {
                     rb.accum_ang_vel.x -= proj_x - flip::SPIN_CAP_X;
@@ -440,6 +441,13 @@ impl Car {
                     rb.accum_ang_vel.y -= proj_y - flip::SPIN_CAP_Y;
                 } else if proj_y < -flip::SPIN_CAP_Y {
                     rb.accum_ang_vel.y -= proj_y + flip::SPIN_CAP_Y;
+                }
+                // The cap edits `accum_ang_vel` after the torque impulses above
+                // were already recorded, so without an entry the ledger
+                // over-states the flip torque by whatever it clipped.
+                let cap_delta = rb.accum_ang_vel - cap_before;
+                if cap_delta != Vec3A::ZERO {
+                    rb.record_impulse("FlipSpinCap", Vec3A::ZERO, cap_delta, true);
                 }
             }
         } else {

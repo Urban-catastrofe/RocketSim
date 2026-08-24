@@ -1140,4 +1140,10 @@ impl Arena {
         let rb = &self.bullet_world.bodies()[car_rb_index];
         &rb.dbg_tick_impulse_history
     }
+
+    #[cfg(debug_assertions)]
+    pub fn get_ball_impulse_history(&self) -> &IndexMap<(&'static str, bool), (Vec3A, Vec3A)> {
+        let rb = &self.bullet_world.bodies()[self.ball.rigid_body_idx];
+        &rb.dbg_tick_impulse_history
+    }
 }

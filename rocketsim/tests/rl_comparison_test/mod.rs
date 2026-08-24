@@ -27,6 +27,7 @@ mod flat_floor;
 mod flipdamp;
 mod impulse_window;
 mod latdump;
+mod ledger;
 mod measure;
 mod recording;
 mod report;
@@ -89,6 +90,13 @@ fn test_recording(recording: &Recording) {
     // steps for the wheel friction study (see latdump.rs).
     if std::env::var("RLLATDUMP").is_ok() {
         latdump::analyze(recording);
+        return;
+    }
+
+    // RLLEDGER=1: per-tick impulse ledger accounting -- decompose each tick's
+    // velocity change by named force. RLLEDGER=2 dumps per-tick rows.
+    if std::env::var("RLLEDGER").is_ok() {
+        ledger::analyze(recording);
         return;
     }
 
