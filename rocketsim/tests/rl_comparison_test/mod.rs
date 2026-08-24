@@ -138,6 +138,10 @@ fn test_recording(recording: &Recording) {
             ballcensus::corner_profile(recording);
             return;
         }
+        Ok("10") => {
+            ballcensus::hit_subframe_audit(recording);
+            return;
+        }
         Ok(_) => {
             ballcensus::analyze(recording);
             return;

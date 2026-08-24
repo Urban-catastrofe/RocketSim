@@ -1120,3 +1120,78 @@ pub fn corner_profile(recording: &Recording) {
         );
     }
 }
+
+/// `RLBALL=10`: does the recorded `OnHitBall` event carry *sub-frame*
+/// information, or does it just restate a frame boundary?
+///
+/// This decides whether the car-ball channel is limited by the recording at all.
+/// The v3 [`HitRecord`] stores `ball_vel_before` -- the ball's velocity at the
+/// instant the game fired its hit event. If that equals the ball's velocity at
+/// the start of the step, the field is a copy and the sub-frame split is as
+/// unobservable for car-ball as it is for ball-world. If it sits *between* the
+/// step's start and end velocities, then the recording already pins where inside
+/// the tick the impulse landed, and the phase term we have been calling
+/// unrecorded is, for car contacts, recorded.
+pub fn hit_subframe_audit(recording: &Recording) {
+    let stride = recording.stride;
+    let last = recording.ticks.len().saturating_sub(stride + 1);
+
+    for i in (0..=last).step_by(stride) {
+        let from_tick = &recording.ticks[i];
+        let to_tick = &recording.ticks[i + stride];
+        let from = &from_tick.ball_record;
+        let to = &to_tick.ball_record;
+        if is_sentinel(from) || is_sentinel(to) {
+            continue;
+        }
+        let v0 = Vec3A::from(from.lin_vel);
+        let v1 = Vec3A::from(to.lin_vel);
+        let dv = v1 - v0;
+
+        for (j, car) in from_tick.car_records.iter().enumerate() {
+            if !car.hit.has_hit {
+                continue;
+            }
+            let vb = Vec3A::from(car.hit.ball_vel_before);
+            // Where `ball_vel_before` sits on the segment from the step's start
+            // velocity to its end velocity. 0 means it restates the start, 1 the
+            // end, anything strictly between is genuine sub-frame information.
+            let t = if dv.length_squared() > 1e-6 {
+                (vb - v0).dot(dv) / dv.length_squared()
+            } else {
+                f32::NAN
+            };
+            // Which recorded tick's ball velocity `ball_vel_before` actually
+            // matches. The logger samples the ball asynchronously from the hit
+            // event, so the obvious alignment need not be the true one.
+            let mut best_off = 99i64;
+            let mut best_d = f32::INFINITY;
+            for off in -3i64..=3 {
+                let idx = i as i64 + off * stride as i64;
+                if idx < 0 || idx as usize >= recording.ticks.len() {
+                    continue;
+                }
+                let r = &recording.ticks[idx as usize].ball_record;
+                if is_sentinel(r) {
+                    continue;
+                }
+                let d = (vb - Vec3A::from(r.lin_vel)).length();
+                if d < best_d {
+                    best_d = d;
+                    best_off = off;
+                }
+            }
+            println!(
+                "BALLHIT {} t{i} car{j} dv={:.2} dfrom={:.2} dto={:.2} t={t:.3} offaxis={:.2} closing={:.1} bestoff={best_off} bestd={best_d:.2}",
+                recording.name,
+                dv.length(),
+                (vb - v0).length(),
+                (vb - v1).length(),
+                // How far `ball_vel_before` lies off the start->end line. A pure
+                // sub-frame sample of the same impulse would sit on it.
+                (vb - (v0 + dv * t)).length(),
+                car.hit.closing_speed,
+            );
+        }
+    }
+}
