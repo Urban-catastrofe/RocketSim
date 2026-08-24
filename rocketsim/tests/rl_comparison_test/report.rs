@@ -100,6 +100,12 @@ pub struct Report {
     /// rather than silently dropped: these are the only steps the per-tick bar
     /// cannot judge, and their number is the size of that blind spot.
     pub impulse_steps_skipped: u64,
+    /// Steps whose ball rows were dropped because the recording's own position
+    /// and velocity channels for the ball contradict each other beyond anything
+    /// physics allows — see [`super::runner::ball_record_corrupt`]. Counted, not
+    /// silently dropped: this number is how much of the ball's ground truth the
+    /// logger cannot support.
+    pub ball_steps_voided: u64,
     pub num_cars: usize,
     /// Cars first (0..num_cars), then the ball at index num_cars.
     pub entities: Vec<EntityReport>,
@@ -118,6 +124,7 @@ impl Report {
             ticks_measured: 0,
             ticks_voided: 0,
             impulse_steps_skipped: 0,
+            ball_steps_voided: 0,
             num_cars,
             entities,
         }
@@ -144,6 +151,7 @@ impl Report {
         self.ticks_measured += other.ticks_measured;
         self.ticks_voided += other.ticks_voided;
         self.impulse_steps_skipped += other.impulse_steps_skipped;
+        self.ball_steps_voided += other.ball_steps_voided;
         for (mine, theirs) in self.entities.iter_mut().zip(other.entities.into_iter()) {
             mine.merge(theirs);
         }
@@ -187,14 +195,20 @@ pub fn evaluate(report: &mut Report, cfg: &HarnessConfig) -> (GateOutcome, Vec<S
     } else {
         String::new()
     };
+    let ball_note = if report.ball_steps_voided > 0 {
+        format!(" ball_steps_voided={}", report.ball_steps_voided)
+    } else {
+        String::new()
+    };
     lines.push(format!(
-        "==== RLPR {} | ticks={} stride={} gate={} percentile=p{:0>2}{} ====",
+        "==== RLPR {} | ticks={} stride={} gate={} percentile=p{:0>2}{}{} ====",
         report.name,
         report.ticks_measured,
         report.stride,
         gate_label,
         (tol.percentile * 100.0) as i32,
         impulse_note,
+        ball_note,
     ));
 
     // A case that compared nothing proves nothing: every field reports 0.0 and

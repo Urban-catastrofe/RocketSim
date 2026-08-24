@@ -126,6 +126,10 @@ fn test_recording(recording: &Recording) {
             ballcensus::response_study(recording);
             return;
         }
+        Ok("7") => {
+            ballcensus::truth_audit(recording);
+            return;
+        }
         Ok(_) => {
             ballcensus::analyze(recording);
             return;

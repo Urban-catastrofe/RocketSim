@@ -62,6 +62,125 @@ pub fn is_car_sentinel(phys: &PhysRecord) -> bool {
 /// reproduce. Such ticks are voided from measurement.
 const MAX_PHYS_DISPLACEMENT: f32 = 100.0;
 
+/// Ball radius in UU, and the nominal soccar arena extents.
+///
+/// The real geometry is the collision mesh; these planes are a deliberately
+/// *conservative* stand-in, used only to answer "was the ball anywhere near a
+/// surface". Every real feature the mesh has -- goal mouth, crossbar, corner
+/// chamfer, ramps -- sits at or inside these planes, so a ball this test calls
+/// far from a surface is genuinely far from one.
+pub(crate) const BALL_RADIUS: f32 = 91.25;
+pub(crate) const ARENA_X: f32 = 4096.0;
+pub(crate) const ARENA_Y: f32 = 5120.0;
+pub(crate) const ARENA_Z: f32 = 2048.0;
+/// The corner chamfer plane, `|x| + |y| = CORNER_C`.
+pub(crate) const CORNER_C: f32 = 8064.0;
+pub(crate) const SQRT2: f32 = std::f32::consts::SQRT_2;
+/// Octane hitbox half-extents and centre offset, as in `census.rs`. Every car in
+/// the suite is an Octane.
+pub(crate) const HITBOX_HALF: glam::Vec3A =
+    glam::Vec3A::new(120.507 / 2.0, 86.6994 / 2.0, 38.6591 / 2.0);
+pub(crate) const HITBOX_OFFSET: glam::Vec3A = glam::Vec3A::new(13.8757, 0.0, 20.755);
+
+/// Distance from a world point to the surface of a car's oriented hitbox (0
+/// inside).
+pub(crate) fn hitbox_dist(point: glam::Vec3A, car: &PhysRecord) -> f32 {
+    let rot = glam::Mat3A::from_cols(
+        car.rot.rows[0].into(),
+        car.rot.rows[1].into(),
+        car.rot.rows[2].into(),
+    );
+    let local = rot.transpose() * (point - glam::Vec3A::from(car.pos)) - HITBOX_OFFSET;
+    glam::Vec3A::new(
+        (local.x.abs() - HITBOX_HALF.x).max(0.0),
+        (local.y.abs() - HITBOX_HALF.y).max(0.0),
+        (local.z.abs() - HITBOX_HALF.z).max(0.0),
+    )
+    .length()
+}
+
+/// Gap from the ball's surface to the nearest nominal arena surface. Negative
+/// inside the goal mouth, which is why this test can never flag a goal-frame
+/// bounce.
+fn ball_gap_to_surface(p: glam::Vec3A) -> f32 {
+    [
+        p.z - BALL_RADIUS,
+        (ARENA_Z - p.z) - BALL_RADIUS,
+        (ARENA_X - p.x.abs()) - BALL_RADIUS,
+        (ARENA_Y - p.y.abs()) - BALL_RADIUS,
+        (CORNER_C - (p.x.abs() + p.y.abs())) / SQRT2 - BALL_RADIUS,
+    ]
+    .into_iter()
+    .fold(f32::INFINITY, f32::min)
+}
+
+/// How far the ball's recorded velocity may sit from the velocity implied by its
+/// own recorded position change before the step is suspect.
+///
+/// Rocket League applies a contact impulse *after* integrating the transform, so
+/// on a contact step `(pos_to - pos_from) / dt` legitimately disagrees with
+/// `vel_to` by exactly one impulse. That is every bounce in the suite and must
+/// not be voided, which is why disagreement alone is not the test -- see
+/// [`ball_record_impossible`].
+const BALL_CHANNEL_DISAGREEMENT: f32 = 500.0;
+
+/// How close a car or a surface must be for a large disagreement to have a
+/// possible cause. Two ticks of travel at the ball's 6 000 uu/s cap is 100 UU,
+/// so nothing resolved anywhere inside the step can be farther away than this.
+const BALL_CAUSE_RANGE: f32 = 100.0;
+
+/// True when the ball's own ground truth for this step describes something
+/// Rocket League cannot have done, so the step cannot grade the sim.
+///
+/// The defect is in the ball's *velocity* channel, and it is distinct from the
+/// car-side corruption [`has_duplicate_car`] and [`frame_advance_broken`] guard
+/// against. The logger samples the ball's velocity separately from its position;
+/// where the two contradict each other by more than the whole arena could
+/// explain, the record is wrong rather than surprising. At `2v2` t4178-t4182 the
+/// recorded velocity flips sign three times in five ticks while the recorded
+/// position moves smoothly, with no car within 900 UU and no surface within 21.
+///
+/// A disagreement on its own is *not* enough — it is the normal signature of a
+/// bounce. The test is a disagreement **with no possible source**: no car and no
+/// arena surface anywhere near the ball at either end of the step. Measured over
+/// the suite that separates completely: it fires on 99 steps, every one of them
+/// in a match replay and none in a scripted recording, and there is a wide
+/// plateau around both thresholds rather than a close call to arbitrate.
+///
+/// Those 99 steps are 0.063% of the ball's measured steps and carry **18.3% of
+/// the suite's whole ball velocity error mass** — the same shape as the
+/// duplicated-car defect on the car side.
+///
+/// Only the ball's own rows are dropped: the cars on these steps are fine, and
+/// [`has_discontinuity`] already covers the defects that spoil a whole tick
+/// (including the 631 156 uu/s cases, which are position teleports).
+pub fn ball_record_impossible(from: &TickRecord, to: &TickRecord, stride: usize) -> bool {
+    if keep_corrupt_steps() {
+        return false;
+    }
+    let p0: glam::Vec3A = from.ball_record.pos.into();
+    let p1: glam::Vec3A = to.ball_record.pos.into();
+    let v_to: glam::Vec3A = to.ball_record.lin_vel.into();
+    let implied = (p1 - p0) / (rocketsim::consts::TICK_TIME * stride as f32);
+    if (implied - v_to).length() <= BALL_CHANNEL_DISAGREEMENT {
+        return false;
+    }
+
+    let near_surface = ball_gap_to_surface(p0).min(ball_gap_to_surface(p1)) < BALL_CAUSE_RANGE;
+    if near_surface {
+        return false;
+    }
+    let near_car = from
+        .car_records
+        .iter()
+        .chain(to.car_records.iter())
+        .filter(|c| !c.is_demoed && !is_car_sentinel(&c.phys))
+        .any(|c| {
+            hitbox_dist(p0, &c.phys).min(hitbox_dist(p1, &c.phys)) - BALL_RADIUS < BALL_CAUSE_RANGE
+        });
+    !near_car
+}
+
 /// Restore+step cycles to run on a fresh shard arena before measuring, so the
 /// Bullet contact manifolds settle (a cold arena's first steps diverge).
 ///
@@ -628,7 +747,11 @@ fn run_per_tick_shard(recording: &Recording, shard: &[usize]) -> Report {
 
         // Skip the ball when it is parked at the "absent" sentinel; comparing
         // against it would fabricate divergence (see is_ball_sentinel).
-        if !is_ball_sentinel(&to_tick.ball_record) {
+        if is_ball_sentinel(&to_tick.ball_record) {
+            // Nothing to file, and nothing corrupt either.
+        } else if ball_record_impossible(from_tick, to_tick, stride) {
+            report.ball_steps_voided += 1;
+        } else {
             let ball_state: &BallState = arena.get_ball_state();
             let ball_delta = compute_delta(&ball_state.phys, &to_tick.ball_record);
             let ball_ent = &mut report.entities[report.num_cars];

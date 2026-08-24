@@ -1762,7 +1762,7 @@ order/quantization, often acceptable.
 | `RLCENSUS` | `1` error-mass census by cause; `2` also lists each bucket's worst steps; `3` sub-bands by speed + handbrake state; `4` by `friction_curve_input`; `5` by suspension compression; `6` by compression x compression rate; `7` 1-UU compression bands with a quiet suspension | off |
 | `RLCTRLOFF` | shift which tick the census reads controls from (`-1`/`0`/`+1`), to re-verify control alignment | `0` |
 | `RLLATDUMP` | `1` to emit one `LATROW` per flat-floor zero-steer step: RL's own lateral friction impulse and the sim's, with per-wheel slip ratio and side impulse. See `latdump.rs` | off |
-| `RLBALL` | `1` census of ball velocity error by contact cause; `2` liveness survey of the ball's world-contact fields plus a position-vs-velocity audit of the recording itself; `3` per-step `BALLDUMP`; `4` `BALLBOUNCE`, judging a bounce by its outcome across a free rollout with tick alignment. See `ballcensus.rs` | off |
+| `RLBALL` | `1` census of ball velocity error by contact cause; `2` liveness survey of the ball's world-contact fields plus a position-vs-velocity audit of the recording itself; `3` per-step `BALLDUMP`; `4` `BALLBOUNCE`, judging a bounce by its outcome across a free rollout with tick alignment; `5` every individual ball-world contact point for `RLBALL_REC` over `RLBALL_T=lo:hi`; `6` `BALLRESP`/`BALLNRM`, the sim's contact response against RL's banded by the ball's gap to the surface; `7` `BALLTRUTH`, per-step ground-truth audit of what survives the harness's existing voids. See `ballcensus.rs` | off |
 | `RLFLIP` | `1` to emit one `FLIPZ` row per isolated airborne flip step: RL's own z-damp decision on the closed vertical axis, with `flip_time`, tumble, `up.z` and both boost orderings. Filter to `0.35*|vzF| > 20` before reading. See `flipdamp.rs` | off |
 | `RLCENSUS` (`10`) | band every bucket by the recorded jump/flip state and `flip_time` phase | off |
 | `RLCARC` (`4`) | survey car-identity transpositions after an array collapse (`CARCSWAP`). Zero suite-wide; kept as a ruled-out hypothesis | off |
@@ -2117,6 +2117,96 @@ So **score the ball on the 244 scripted recordings and not on the match
 replays**, which hold 78% of its raw error mass and cannot support any of it.
 This is not the same defect as [[match-replays-duplicate-cars]] -- that one is
 the *car* array collapsing; this is the ball's own velocity channel.
+
+#### The ball's bounce is right; what is wrong is *when* (RLBALL=6)
+
+`RLBALL=6` was built to test one hypothesis and had never been run. Run over
+5 877 ball-world contact ticks in the 143 no-car recordings, cars held 500 UU
+clear, it settles the question the other way round from the guess.
+
+Take the 46 clean two-tick bounces -- where Rocket League spreads one bounce
+across two recorded ticks -- and compare the sim's **first** contact tick against
+RL's **whole** bounce:
+
+| | median | p25 | p75 |
+|---|---|---|---|
+| sim first tick / RL first tick | 1.60 | 1.24 | 3.31 |
+| sim first tick / RL's entire bounce | **0.997** | 0.991 | 1.000 |
+
+96% land within 10% of RL's total, and the median angle between the sim's
+impulse and RL's is **0.1 degrees** (p90 2.7). Restitution, friction, drag and
+the contact direction are therefore all correct. **The sim resolves a bounce in
+one tick where RL takes two**, on 46 of the 179 bounces above 500 uu/s. Under the
+per-tick bar that costs the whole impulse, twice.
+
+RL's split is not derivable from the recording, which is why no fix is proposed
+here:
+
+- Time of impact would predict it: correlation **+0.36**, against the ~+1.0 a TOI
+  split requires. The median bounce still has 95% of the tick left after the ball
+  reaches the surface, yet RL's median first-tick share is 63%.
+- A fixed per-tick impulse ceiling would predict it: RL's first-tick impulse
+  correlates **+0.807** with approach speed, so there is no cap.
+- A five-parameter fit on 46 points reaches R^2 0.52. That is overfitting.
+
+This is the ball's version of [[impulse-bucket-is-mostly-phase]]. Scaling the
+first impulse by a constant scores well (24% of the current error) and is pure
+metric-fitting; do not.
+
+Two hypotheses are now measured and dead:
+
+- **Normal selection in `convert_contact_special`.** Over 138 multi-normal ticks,
+  the angle to RL's impulse is 17.3 degrees for the current plain mean, 16.8 for
+  the mean over distinct normals, 17.3 for the deepest contact and 15.6 for the
+  most opposed. No rule wins by more than two degrees, and the baseline includes
+  friction, so this cannot be resolved by choosing differently.
+- **Speculative contact as the cause of over-reaction.** The prediction was that
+  the sim/RL ratio blows up as the gap goes positive. Banded, it does not: gap
+  0-1 UU gives median ratio 0.937 and gap >1 UU gives 0.993.
+
+#### 99 impossible ball steps carried 18% of its error (RLBALL=7)
+
+The ball's ground truth had never been filtered. `RLBALL=7` audits what survives
+the harness's existing voids, and the answer is a small, cleanly separable set.
+
+The headline 631 156 uu/s self-inconsistencies are *already* gone: they are
+position teleports, and `has_discontinuity` rejects them on displacement. What
+survives is subtler -- the velocity channel contradicting a position channel that
+looks perfectly smooth.
+
+Disagreement alone cannot be the test. Rocket League applies a contact impulse
+*after* integrating the transform, so on a contact step `(pos_to - pos_from) / dt`
+legitimately differs from `vel_to` by exactly one impulse. That is every bounce
+in the suite. The test that works is a disagreement **with no possible source**:
+over 500 uu/s, with no car and no arena surface within 100 UU of the ball at
+either end of the step.
+
+| population | measured steps | self > 500 | ...and no car | ...and no surface |
+|---|---|---|---|---|
+| scripted | 65 053 | 55 | 48 | **0** |
+| match replays | 92 853 | 279 | 192 | **115** |
+
+The separation is total, and there is a wide plateau around both thresholds
+rather than a close call to arbitrate (at 300/100 it is still 0 scripted against
+158 replay; at 800/250, 0 against 20). Note the surface test uses the nominal
+arena planes, which go *negative* inside the goal mouth -- so it can never flag a
+goal-frame bounce, the one region the ball's real residual lives in.
+
+Those 97 steps as the runner counts them are **0.06% of the ball's measured
+steps and 18.3% of the suite's whole ball velocity error mass** -- the same shape
+as [[match-replays-duplicate-cars]] on the car side:
+
+| | before | after |
+|---|---|---|
+| suite ball vel rms | 124.07 uu/s | **112.18** (-9.6%) |
+| scripted ball vel rms | 69.2734 | **69.2734** (unchanged) |
+| suite ball pos rms | 4.4367 UU | 4.4206 (-0.4%) |
+
+Scripted ground truth is untouched to four decimals, which is the property that
+matters: the filter removes logger corruption and nothing else. The gate pass set
+is unchanged and the ball's 463 gate violations are unchanged -- 97 steps do not
+move a p99 -- so this is a metric-honesty fix, not a gate win. `RLKEEPDUP=1`
+keeps them in for re-measurement.
 
 ### The Flip Z-Damp Was Firing On Almost Everything (-13.4%, RLFLIP)
 

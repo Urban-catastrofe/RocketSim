@@ -23,14 +23,16 @@
 
 use std::collections::BTreeMap;
 
-use glam::{Mat3A, Vec3A};
+use glam::Vec3A;
 use rocketsim::consts::TICK_TIME;
 use rocketsim::{ArenaEvent, CarControls};
 
 use super::census::{ball_touches_car, is_sentinel};
 use super::recording::Recording;
-use super::recording::cpp_records::PhysRecord;
-use super::runner::{has_discontinuity, is_car_sentinel, make_arena, set_state_to_record_tick};
+use super::runner::{
+    ARENA_X, ARENA_Y, ARENA_Z, BALL_RADIUS, CORNER_C, SQRT2, has_discontinuity, hitbox_dist,
+    is_car_sentinel, make_arena, set_state_to_record_tick,
+};
 
 /// A contact normal this close to an axis counts as that flat face. Bounces off
 /// the flat floor/walls/ceiling are already accurate, so the interesting classes
@@ -39,24 +41,12 @@ const FLAT_TOL: f32 = 0.02;
 /// Above this velocity residual a nominally contact-free step is really a
 /// contact the sim missed: free flight is otherwise exact to about 0.01 uu/s.
 const MISS_THRESHOLD: f32 = 10.0;
-const BALL_RADIUS: f32 = 91.25;
-/// Nominal soccar arena extents, for naming which surface a missed contact was
-/// near. Only used for reporting -- the real geometry is the collision mesh.
-const ARENA_X: f32 = 4096.0;
-const ARENA_Y: f32 = 5120.0;
-const ARENA_Z: f32 = 2048.0;
-/// The corner chamfer plane, `|x| + |y| = CORNER_C`.
-const CORNER_C: f32 = 8064.0;
-const SQRT2: f32 = std::f32::consts::SQRT_2;
 /// How far the ball's recorded velocity may sit from the velocity implied by its
 /// own recorded position change before the step is called self-inconsistent.
 /// Generous: the channels agree to well under 1 uu/s wherever they agree at all.
 const SELF_CONSISTENCY_TOL: f32 = 5.0;
 /// Gravity's contribution to one tick of velocity, 650 / 120.
 const GRAV_DV: f32 = 650.0 / 120.0;
-/// Octane hitbox half-extents and centre offset, as in `census.rs`.
-const HITBOX_HALF: Vec3A = Vec3A::new(120.507 / 2.0, 86.6994 / 2.0, 38.6591 / 2.0);
-const HITBOX_OFFSET: Vec3A = Vec3A::new(13.8757, 0.0, 20.755);
 
 #[derive(Default)]
 struct Bucket {
@@ -575,22 +565,76 @@ pub fn bounce_study(recording: &Recording) {
     }
 }
 
-/// Distance from a world point to the surface of a car's oriented hitbox (0
-/// inside). The same box `census::ball_touches_car` tests, but returning the
-/// distance instead of a slack-thresholded bool.
-fn hitbox_dist(point: Vec3A, car: &PhysRecord) -> f32 {
-    let rot = Mat3A::from_cols(
-        car.rot.rows[0].into(),
-        car.rot.rows[1].into(),
-        car.rot.rows[2].into(),
-    );
-    let local = rot.transpose() * (point - Vec3A::from(car.pos)) - HITBOX_OFFSET;
-    Vec3A::new(
-        (local.x.abs() - HITBOX_HALF.x).max(0.0),
-        (local.y.abs() - HITBOX_HALF.y).max(0.0),
-        (local.z.abs() - HITBOX_HALF.z).max(0.0),
-    )
-    .length()
+/// `RLBALL=7`: how much of the ball's ground truth is still unusable *after* the
+/// harness's existing filters, and can it be told apart from a real bounce?
+///
+/// [`super::runner::has_discontinuity`] already voids any step where the ball's
+/// recorded position jumps more than `MAX_PHYS_DISPLACEMENT`, which is what the
+/// headline 631 156 uu/s self-inconsistencies actually are. The open question is
+/// what survives that: a step where the *velocity* channel contradicts the
+/// position channel while the position channel itself looks smooth cannot be
+/// spotted by a displacement test, and 2v2 t4178-t4182 -- velocity flipping sign
+/// three times in five ticks with no car within 900 UU -- is exactly that shape.
+///
+/// So this prints, over measured steps only, the self-consistency error together
+/// with what could physically have caused it: the gap from the ball surface to
+/// the nearest live car hitbox, and the recorded velocity change. A step with a
+/// large disagreement, no car anywhere near, and the ball far inside the arena
+/// has no possible source and is corrupt; one next to a car or a surface is a
+/// bounce and must be kept.
+pub fn truth_audit(recording: &Recording) {
+    let stride = recording.stride;
+    let last = recording.ticks.len().saturating_sub(stride + 1);
+    let dt = TICK_TIME * stride as f32;
+
+    for i in (0..=last).step_by(stride) {
+        if has_discontinuity(recording, i, stride) {
+            continue;
+        }
+        let from_tick = &recording.ticks[i];
+        let to_tick = &recording.ticks[i + stride];
+        let from = &from_tick.ball_record;
+        let to = &to_tick.ball_record;
+        if is_sentinel(from) || is_sentinel(to) {
+            continue;
+        }
+
+        let p = Vec3A::from(from.pos);
+        let implied = (Vec3A::from(to.pos) - p) / dt;
+        let self_err = (implied - Vec3A::from(to.lin_vel)).length();
+        let dv = Vec3A::from(to.lin_vel) - Vec3A::from(from.lin_vel);
+
+        // Nearest live car, and nearest nominal flat surface. Both are the
+        // *recording's* own data -- no simulation is involved, so a step this
+        // flags is impossible in Rocket League rather than merely missed by us.
+        let dcar = from_tick
+            .car_records
+            .iter()
+            .chain(to_tick.car_records.iter())
+            .filter(|c| !c.is_demoed && !is_car_sentinel(&c.phys))
+            .map(|c| hitbox_dist(p, &c.phys) - BALL_RADIUS)
+            .fold(f32::INFINITY, f32::min);
+        let dsurf = [
+            p.z - BALL_RADIUS,
+            (ARENA_Z - p.z) - BALL_RADIUS,
+            (ARENA_X - p.x.abs()) - BALL_RADIUS,
+            (ARENA_Y - p.y.abs()) - BALL_RADIUS,
+            (CORNER_C - (p.x.abs() + p.y.abs())) / SQRT2 - BALL_RADIUS,
+        ]
+        .into_iter()
+        .fold(f32::INFINITY, f32::min);
+
+        println!(
+            "BALLTRUTH {} t{i} self={self_err:.2} dv={:.2} vfrom={:.1} vto={:.1} dcar={dcar:.1} dsurf={dsurf:.1} pos=({:.0},{:.0},{:.0})",
+            recording.name,
+            dv.length(),
+            Vec3A::from(from.lin_vel).length(),
+            Vec3A::from(to.lin_vel).length(),
+            p.x,
+            p.y,
+            p.z,
+        );
+    }
 }
 
 /// `RLBALL=2`: is anything in the ball's world-contact triple actually written?
