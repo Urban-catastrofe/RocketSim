@@ -1,0 +1,6604 @@
+{
+  "request": {
+    "cars": [
+      {
+        "av": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "boost": 100.0,
+        "inp": [],
+        "og": false,
+        "p": [
+          0.0,
+          0.0,
+          17.0
+        ],
+        "rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "v": [
+          1000.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "av": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "boost": 100.0,
+        "inp": [],
+        "og": false,
+        "p": [
+          175.0,
+          0.0,
+          17.0
+        ],
+        "rot": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "v": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    ],
+    "cmd": "run",
+    "contacts": true,
+    "name": "car_car_basic_bump",
+    "ticks": 30
+  },
+  "response": {
+    "contacts_captured": false,
+    "control_phase": "pre_physics",
+    "hits": [
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [
+        {
+          "actor": 0,
+          "ca": [
+            0.0,
+            0.101724,
+            0.0
+          ],
+          "car": 0,
+          "cboost": 100.0,
+          "closing": -971.222534,
+          "cp": [
+            50.561394,
+            0.0,
+            17.0
+          ],
+          "cr": [
+            -49.0,
+            0.0,
+            0.0
+          ],
+          "ctl": {
+            "bo": false,
+            "hb": false,
+            "j": false,
+            "p": 0.0,
+            "r": 0.0,
+            "st": 0.0,
+            "th": 0.0,
+            "y": 0.0
+          },
+          "cv": [
+            972.999207,
+            0.0,
+            -0.297591
+          ],
+          "loc": [
+            131.553253,
+            -0.000348,
+            37.978317
+          ],
+          "nrm": [
+            -0.999986,
+            -5e-06,
+            0.005379
+          ],
+          "oa": [
+            0.0,
+            0.10112,
+            0.0
+          ],
+          "op": [
+            175.051651,
+            0.0,
+            17.0
+          ],
+          "other": 1,
+          "ov": [
+            1.762761,
+            0.0,
+            -0.289239
+          ],
+          "rel_vel": 971.23645,
+          "type": "car_car"
+        },
+        {
+          "actor": 0,
+          "ca": [
+            0.0,
+            0.10112,
+            0.0
+          ],
+          "car": 1,
+          "cboost": 100.0,
+          "closing": -971.222534,
+          "cp": [
+            175.051651,
+            0.0,
+            17.0
+          ],
+          "cr": [
+            -47.0,
+            0.0,
+            0.0
+          ],
+          "ctl": {
+            "bo": false,
+            "hb": false,
+            "j": false,
+            "p": 0.0,
+            "r": 0.0,
+            "st": -1.0,
+            "th": -1.0,
+            "y": 0.0
+          },
+          "cv": [
+            1.762761,
+            0.0,
+            -0.289239
+          ],
+          "loc": [
+            131.553253,
+            -0.000348,
+            37.978317
+          ],
+          "nrm": [
+            0.999986,
+            5e-06,
+            -0.005379
+          ],
+          "oa": [
+            0.0,
+            0.101724,
+            0.0
+          ],
+          "op": [
+            50.561394,
+            0.0,
+            17.0
+          ],
+          "other": 0,
+          "ov": [
+            972.999207,
+            0.0,
+            -0.297591
+          ],
+          "rel_vel": 971.23645,
+          "type": "car_car"
+        }
+      ],
+      [
+        {
+          "actor": 0,
+          "ca": [
+            0.0,
+            -0.056769,
+            -3.5e-05
+          ],
+          "car": 0,
+          "cboost": 100.0,
+          "closing": -666.02655,
+          "cp": [
+            57.435261,
+            0.0,
+            16.998352
+          ],
+          "cr": [
+            -43.0,
+            0.0,
+            0.0
+          ],
+          "ctl": {
+            "bo": false,
+            "hb": false,
+            "j": false,
+            "p": 0.0,
+            "r": 0.0,
+            "st": 0.0,
+            "th": 0.0,
+            "y": 0.0
+          },
+          "cv": [
+            881.717529,
+            0.0,
+            -0.719976
+          ],
+          "loc": [
+            132.152283,
+            -0.000388,
+            38.509193
+          ],
+          "nrm": [
+            -0.999998,
+            -5e-06,
+            -0.002196
+          ],
+          "oa": [
+            0.0,
+            0.263095,
+            -3.5e-05
+          ],
+          "op": [
+            176.263184,
+            0.0,
+            17.0
+          ],
+          "other": 1,
+          "ov": [
+            215.618164,
+            0.0,
+            31.720282
+          ],
+          "rel_vel": 666.888855,
+          "type": "car_car"
+        },
+        {
+          "actor": 0,
+          "ca": [
+            0.0,
+            0.263095,
+            -3.5e-05
+          ],
+          "car": 1,
+          "cboost": 100.0,
+          "closing": -666.02655,
+          "cp": [
+            176.263184,
+            0.0,
+            17.0
+          ],
+          "cr": [
+            -71.0,
+            0.0,
+            0.0
+          ],
+          "ctl": {
+            "bo": false,
+            "hb": false,
+            "j": false,
+            "p": 0.0,
+            "r": 0.0,
+            "st": -1.0,
+            "th": -1.0,
+            "y": 0.0
+          },
+          "cv": [
+            215.618164,
+            0.0,
+            31.720282
+          ],
+          "loc": [
+            132.152283,
+            -0.000388,
+            38.509193
+          ],
+          "nrm": [
+            0.999998,
+            5e-06,
+            0.002196
+          ],
+          "oa": [
+            0.0,
+            -0.056769,
+            -3.5e-05
+          ],
+          "op": [
+            57.435261,
+            0.0,
+            16.998352
+          ],
+          "other": 0,
+          "ov": [
+            881.717529,
+            0.0,
+            -0.719976
+          ],
+          "rel_vel": 666.888855,
+          "type": "car_car"
+        }
+      ],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      []
+    ],
+    "manifold_impulse_status": "candidate_unverified",
+    "manifolds": [],
+    "name": "car_car_basic_bump",
+    "num_cars": 2,
+    "ok": true,
+    "schema_version": 8,
+    "state_phase": "post_physics",
+    "tick_rate": 120,
+    "ticks": [
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          0.008347,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          1.366252,
+          0.0,
+          17.0
+        ],
+        "c0r": [
+          -1.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          999.279968,
+          0.0,
+          0.021564
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 79.734398,
+            "susp": -1.500416
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 79.734398,
+            "susp": -1.500136
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 66.445335,
+            "susp": -2.299978
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 66.445335,
+            "susp": -2.299659
+          }
+        ],
+        "c1a": [
+          0.0,
+          0.007409,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": true,
+        "c1p": [
+          175.0,
+          0.0,
+          17.0
+        ],
+        "c1r": [
+          -1.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          0.0,
+          0.0,
+          0.019918
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.074876,
+            "susp": -1.500416
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.074876,
+            "susp": -1.500136
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.062398,
+            "susp": -2.299975
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.062398,
+            "susp": -2.299659
+          }
+        ],
+        "t": 1
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          0.055863,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          9.659933,
+          0.0,
+          17.0
+        ],
+        "c0r": [
+          -6.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          994.899841,
+          0.0,
+          0.124414
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 79.435806,
+            "susp": -1.521987
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 79.435806,
+            "susp": -1.521707
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 66.196709,
+            "susp": -2.285777
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 66.196701,
+            "susp": -2.285461
+          }
+        ],
+        "c1a": [
+          0.0,
+          0.0499,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": true,
+        "c1p": [
+          175.001648,
+          0.0,
+          17.0
+        ],
+        "c1r": [
+          -5.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          0.15822,
+          0.0,
+          0.117707
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.201283,
+            "susp": -1.519766
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.201284,
+            "susp": -1.519489
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.167898,
+            "susp": -2.287133
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.167899,
+            "susp": -2.286817
+          }
+        ],
+        "t": 2
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          0.084875,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          17.913511,
+          0.0,
+          17.0
+        ],
+        "c0r": [
+          -13.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          990.519775,
+          0.0,
+          0.076016
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 79.113884,
+            "susp": -1.556811
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 79.113884,
+            "susp": -1.556531
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 65.928864,
+            "susp": -2.262823
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 65.928864,
+            "susp": -2.262504
+          }
+        ],
+        "c1a": [
+          0.0,
+          0.077657,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": true,
+        "c1p": [
+          175.011642,
+          0.0,
+          17.0
+        ],
+        "c1r": [
+          -12.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1.025218,
+          0.0,
+          0.086181
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.261559,
+            "susp": -1.551837
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.261561,
+            "susp": -1.551557
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.218497,
+            "susp": -2.265851
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.218498,
+            "susp": -2.265535
+          }
+        ],
+        "t": 3
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          0.100612,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          26.128929,
+          0.0,
+          17.0
+        ],
+        "c0r": [
+          -22.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          986.139526,
+          0.0,
+          -0.018282
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 78.775337,
+            "susp": -1.599365
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 78.775337,
+            "susp": -1.599085
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 65.647285,
+            "susp": -2.234758
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 65.647285,
+            "susp": -2.234442
+          }
+        ],
+        "c1a": [
+          0.0,
+          0.094092,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": true,
+        "c1p": [
+          175.021637,
+          0.0,
+          17.0
+        ],
+        "c1r": [
+          -20.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1.397117,
+          0.0,
+          -0.007447
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.298767,
+            "susp": -1.591629
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.298769,
+            "susp": -1.591349
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.250005,
+            "susp": -2.239419
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.250006,
+            "susp": -2.239101
+          }
+        ],
+        "t": 4
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          0.106776,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          34.312504,
+          0.0,
+          17.0
+        ],
+        "c0r": [
+          -31.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          981.75946,
+          0.0,
+          -0.127472
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 78.425224,
+            "susp": -1.644677
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 78.425224,
+            "susp": -1.644397
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 65.356071,
+            "susp": -2.20487
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 65.356064,
+            "susp": -2.204551
+          }
+        ],
+        "c1a": [
+          0.0,
+          0.102022,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": true,
+        "c1p": [
+          175.031647,
+          0.0,
+          17.0
+        ],
+        "c1r": [
+          -29.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1.650767,
+          0.0,
+          -0.117472
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.312078,
+            "susp": -1.635277
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.312079,
+            "susp": -1.635003
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.261626,
+            "susp": -2.210407
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.261628,
+            "susp": -2.210088
+          }
+        ],
+        "t": 5
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          0.106418,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          42.456078,
+          0.0,
+          17.0
+        ],
+        "c0r": [
+          -40.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          977.379395,
+          0.0,
+          -0.22418
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 78.067429,
+            "susp": -1.690522
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 78.067421,
+            "susp": -1.690242
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 65.058357,
+            "susp": -2.174591
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 65.058357,
+            "susp": -2.174275
+          }
+        ],
+        "c1a": [
+          0.0,
+          0.103764,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": true,
+        "c1p": [
+          175.041641,
+          0.0,
+          17.0
+        ],
+        "c1r": [
+          -38.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1.754295,
+          0.0,
+          -0.21418
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.309941,
+            "susp": -1.679474
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.309942,
+            "susp": -1.679194
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.260314,
+            "susp": -2.181016
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.260316,
+            "susp": -2.180694
+          }
+        ],
+        "t": 6
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          0.101724,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          50.561394,
+          0.0,
+          17.0
+        ],
+        "c0r": [
+          -49.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          972.999207,
+          0.0,
+          -0.297591
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 77.704857,
+            "susp": -1.734698
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 77.704849,
+            "susp": -1.734418
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 64.756523,
+            "susp": -2.145396
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 64.756523,
+            "susp": -2.14508
+          }
+        ],
+        "c1a": [
+          0.0,
+          0.10112,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": true,
+        "c1p": [
+          175.051651,
+          0.0,
+          17.0
+        ],
+        "c1r": [
+          -47.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1.762761,
+          0.0,
+          -0.289239
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.296751,
+            "susp": -1.723099
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.296753,
+            "susp": -1.722819
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.249684,
+            "susp": -2.151977
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 0.249686,
+            "susp": -2.151658
+          }
+        ],
+        "t": 7
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          -0.056769,
+          -3.5e-05
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          57.435261,
+          0.0,
+          16.998352
+        ],
+        "c0r": [
+          -43.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          881.717529,
+          0.0,
+          -0.719976
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 33.657131,
+            "susp": -1.775551
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 33.658016,
+            "susp": -1.775271
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 28.022276,
+            "susp": -2.118383
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 28.023119,
+            "susp": -2.118068
+          }
+        ],
+        "c1a": [
+          0.0,
+          0.263095,
+          -3.5e-05
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": true,
+        "c1p": [
+          176.263184,
+          0.0,
+          17.0
+        ],
+        "c1r": [
+          -71.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          215.618164,
+          0.0,
+          31.720282
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 105.772369,
+            "susp": -1.764515
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 105.773262,
+            "susp": -1.764235
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 88.176071,
+            "susp": -2.124394
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 88.17691,
+            "susp": -2.124079
+          }
+        ],
+        "t": 8
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          -0.788444,
+          -0.000194
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          58.620605,
+          0.0,
+          16.988352
+        ],
+        "c0r": [
+          31.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          436.988953,
+          0.0,
+          -2.407454
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 33.696297,
+            "susp": -1.397568
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 33.697014,
+            "susp": -1.397291
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 28.087435,
+            "susp": -2.38422
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 28.088114,
+            "susp": -2.383901
+          }
+        ],
+        "c1a": [
+          0.0,
+          1.106759,
+          -0.000194
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": true,
+        "c1p": [
+          184.183273,
+          0.0,
+          17.255522
+        ],
+        "c1r": [
+          -171.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1298.758911,
+          0.0,
+          192.790756
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 105.241341,
+            "susp": -2.259484
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 105.242088,
+            "susp": -2.259204
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 87.794518,
+            "susp": -1.793282
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 87.795235,
+            "susp": -1.79296
+          }
+        ],
+        "t": 9
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          -0.528869,
+          -9.2e-05
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          61.99868,
+          0.0,
+          16.984947
+        ],
+        "c0r": [
+          78.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          432.608734,
+          0.0,
+          -0.245126
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 33.868671,
+            "susp": -1.15613
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 33.869045,
+            "susp": -1.155853
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 28.234535,
+            "susp": -2.559163
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 28.234892,
+            "susp": -2.558847
+          }
+        ],
+        "c1a": [
+          0.0,
+          1.107109,
+          -9.2e-05
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": true,
+        "c1p": [
+          195.19429,
+          0.0,
+          18.794046
+        ],
+        "c1r": [
+          -268.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1294.378662,
+          0.0,
+          184.6604
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 104.855492,
+            "susp": -1.181731
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 104.855888,
+            "susp": -1.18145
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 87.531441,
+            "susp": 0.075874
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 87.531822,
+            "susp": 0.076196
+          }
+        ],
+        "t": 10
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          -0.230689,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          65.563881,
+          0.0,
+          17.014948
+        ],
+        "c0r": [
+          98.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          428.228546,
+          0.0,
+          3.467287
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 33.871994,
+            "susp": -1.01245
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 33.87199,
+            "susp": -1.012173
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 28.229586,
+            "susp": -2.603512
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 28.229584,
+            "susp": -2.603196
+          }
+        ],
+        "c1a": [
+          0.0,
+          1.107742,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": true,
+        "c1p": [
+          205.948151,
+          0.0,
+          20.262564
+        ],
+        "c1r": [
+          -364.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1289.998535,
+          0.0,
+          176.530045
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 104.4701,
+            "susp": -0.169212
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 104.470108,
+            "susp": -0.168929
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 87.268517,
+            "susp": 1.87557
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 87.268524,
+            "susp": 1.875898
+          }
+        ],
+        "t": 11
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          -0.034568,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          69.097481,
+          0.0,
+          17.043299
+        ],
+        "c0r": [
+          101.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          423.848297,
+          0.0,
+          3.443104
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 33.736252,
+            "susp": -0.958598
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 33.736252,
+            "susp": -0.958318
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 28.109615,
+            "susp": -2.589093
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 28.109615,
+            "susp": -2.588777
+          }
+        ],
+        "c1a": [
+          0.0,
+          1.108575,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": true,
+        "c1p": [
+          216.662155,
+          0.0,
+          21.662745
+        ],
+        "c1r": [
+          -460.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1285.618286,
+          0.0,
+          168.399582
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 104.084518,
+            "susp": 0.774989
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 104.084534,
+            "susp": 0.775272
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 87.0056,
+            "susp": 3.608415
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 87.005615,
+            "susp": 3.608742
+          }
+        ],
+        "t": 12
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          0.082628,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          72.59269,
+          0.0,
+          17.061649
+        ],
+        "c0r": [
+          94.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          419.46814,
+          0.0,
+          2.22926
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 33.506153,
+            "susp": -0.969109
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 33.506157,
+            "susp": -0.968829
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 27.914412,
+            "susp": -2.549158
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 27.914417,
+            "susp": -2.548842
+          }
+        ],
+        "c1a": [
+          0.0,
+          1.109625,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": true,
+        "c1p": [
+          227.337677,
+          0.0,
+          23.001251
+        ],
+        "c1r": [
+          -557.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1281.238037,
+          0.0,
+          160.269226
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 103.698952,
+            "susp": 1.661101
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 103.698967,
+            "susp": 1.661387
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 86.74292,
+            "susp": 5.284795
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 86.742928,
+            "susp": 5.285117
+          }
+        ],
+        "t": 13
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          0.148991,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          76.056152,
+          0.0,
+          17.07
+        ],
+        "c0r": [
+          81.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          415.088043,
+          0.0,
+          1.259145
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 33.227726,
+            "susp": -1.02011
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 33.227726,
+            "susp": -1.019832
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 27.681404,
+            "susp": -2.499272
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 27.681404,
+            "susp": -2.498956
+          }
+        ],
+        "c1a": [
+          0.0,
+          1.110958,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": true,
+        "c1p": [
+          237.981277,
+          0.0,
+          24.269722
+        ],
+        "c1r": [
+          -653.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1276.85791,
+          0.0,
+          152.139069
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 103.313515,
+            "susp": 2.479291
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 103.313522,
+            "susp": 2.479577
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 86.480614,
+            "susp": 6.895027
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 86.480621,
+            "susp": 6.895354
+          }
+        ],
+        "t": 14
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          0.188459,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          79.479744,
+          0.0,
+          17.07
+        ],
+        "c0r": [
+          64.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          410.707794,
+          0.0,
+          0.365182
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 32.913624,
+            "susp": -1.099384
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 32.913628,
+            "susp": -1.099104
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 27.420462,
+            "susp": -2.447389
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 27.420462,
+            "susp": -2.447073
+          }
+        ],
+        "c1a": [
+          0.0,
+          1.112491,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": true,
+        "c1p": [
+          248.585266,
+          0.0,
+          25.468231
+        ],
+        "c1r": [
+          -750.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1272.477661,
+          0.0,
+          144.008606
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 102.928024,
+            "susp": 3.229684
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 102.92804,
+            "susp": 3.229979
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 86.218559,
+            "susp": 8.439419
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 86.218575,
+            "susp": 8.439747
+          }
+        ],
+        "t": 15
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          0.208082,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          82.864853,
+          0.0,
+          17.068348
+        ],
+        "c0r": [
+          46.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          406.327698,
+          0.0,
+          -0.370082
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 32.573669,
+            "susp": -1.188022
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 32.573673,
+            "susp": -1.187745
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 27.139002,
+            "susp": -2.389283
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 27.139002,
+            "susp": -2.388968
+          }
+        ],
+        "c1a": [
+          0.0,
+          1.114224,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": true,
+        "c1p": [
+          259.150543,
+          0.0,
+          26.598347
+        ],
+        "c1r": [
+          -847.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1268.097656,
+          0.0,
+          135.878448
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 102.54248,
+            "susp": 3.912434
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 102.542503,
+            "susp": 3.912726
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 85.956772,
+            "susp": 9.91824
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 85.956787,
+            "susp": 9.918573
+          }
+        ],
+        "t": 16
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          0.213415,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          86.218399,
+          0.0,
+          17.058348
+        ],
+        "c0r": [
+          28.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          401.94751,
+          0.0,
+          -0.938724
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 32.215855,
+            "susp": -1.289383
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 32.215855,
+            "susp": -1.289105
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 26.843037,
+            "susp": -2.33932
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 26.84304,
+            "susp": -2.339004
+          }
+        ],
+        "c1a": [
+          0.0,
+          1.116173,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": true,
+        "c1p": [
+          269.684387,
+          0.0,
+          27.666832
+        ],
+        "c1r": [
+          -944.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1263.717407,
+          0.0,
+          127.748093
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 102.156876,
+            "susp": 4.537624
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 102.156883,
+            "susp": 4.537913
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 85.695267,
+            "susp": 11.341765
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 85.695274,
+            "susp": 11.342093
+          }
+        ],
+        "t": 17
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          0.208609,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          89.531853,
+          0.0,
+          17.048347
+        ],
+        "c0r": [
+          9.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          397.567413,
+          0.0,
+          -1.320648
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 31.845806,
+            "susp": -1.389578
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 31.845808,
+            "susp": -1.389298
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 26.536835,
+            "susp": -2.290024
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 26.536839,
+            "susp": -2.289702
+          }
+        ],
+        "c1a": [
+          0.0,
+          1.1192,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": false,
+        "c1p": [
+          280.181274,
+          0.0,
+          28.665289
+        ],
+        "c1r": [
+          -1041.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1259.699097,
+          0.0,
+          119.61792
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 101.951927,
+            "susp": 5.094748
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 101.951904,
+            "susp": 5.095041
+          },
+          {
+            "contact": false,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "spin": 85.195366,
+            "susp": 12.0
+          },
+          {
+            "contact": false,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "spin": 85.195374,
+            "susp": 12.0
+          }
+        ],
+        "t": 18
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          0.196932,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          92.806999,
+          0.0,
+          17.038347
+        ],
+        "c0r": [
+          -8.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          393.187286,
+          0.0,
+          -1.537523
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 31.468233,
+            "susp": -1.484749
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 31.468233,
+            "susp": -1.484469
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 26.224028,
+            "susp": -2.243955
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 26.224028,
+            "susp": -2.243637
+          }
+        ],
+        "c1a": [
+          0.0,
+          1.126515,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": false,
+        "c1p": [
+          290.658325,
+          0.0,
+          29.59375
+        ],
+        "c1r": [
+          -1139.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1257.509155,
+          0.0,
+          111.487656
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 101.746979,
+            "susp": 5.582246
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 101.746979,
+            "susp": 5.582541
+          },
+          {
+            "contact": false,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "spin": 84.69838,
+            "susp": 12.0
+          },
+          {
+            "contact": false,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "spin": 84.698387,
+            "susp": 12.0
+          }
+        ],
+        "t": 19
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          0.180902,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          96.050568,
+          0.0,
+          17.028347
+        ],
+        "c0r": [
+          -23.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          388.807037,
+          0.0,
+          -1.621
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 31.086464,
+            "susp": -1.573238
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 31.086464,
+            "susp": -1.572958
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 25.907278,
+            "susp": -2.202214
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 25.907278,
+            "susp": -2.201898
+          }
+        ],
+        "c1a": [
+          0.0,
+          1.134531,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": false,
+        "c1p": [
+          301.117249,
+          0.0,
+          30.45223
+        ],
+        "c1r": [
+          -1238.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1255.31897,
+          0.0,
+          103.357208
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 101.541824,
+            "susp": 5.999604
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 101.541817,
+            "susp": 5.999899
+          },
+          {
+            "contact": false,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "spin": 84.204277,
+            "susp": 12.0
+          },
+          {
+            "contact": false,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "spin": 84.204285,
+            "susp": 12.0
+          }
+        ],
+        "t": 20
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          0.162503,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          99.254097,
+          0.0,
+          17.018347
+        ],
+        "c0r": [
+          -37.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          384.426849,
+          0.0,
+          -1.60612
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 30.703163,
+            "susp": -1.653951
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 30.703163,
+            "susp": -1.653674
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 25.588783,
+            "susp": -2.165543
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 25.588783,
+            "susp": -2.165221
+          }
+        ],
+        "c1a": [
+          0.0,
+          1.143248,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": false,
+        "c1p": [
+          311.564392,
+          0.0,
+          31.242344
+        ],
+        "c1r": [
+          -1337.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1253.128906,
+          0.0,
+          95.226852
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 101.336388,
+            "susp": 6.346813
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 101.33638,
+            "susp": 6.347108
+          },
+          {
+            "contact": false,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "spin": 83.713066,
+            "susp": 12.0
+          },
+          {
+            "contact": false,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "spin": 83.713074,
+            "susp": 12.0
+          }
+        ],
+        "t": 21
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          0.143085,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          102.419243,
+          0.0,
+          17.008347
+        ],
+        "c0r": [
+          -50.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          380.046692,
+          0.0,
+          -1.504542
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 30.319979,
+            "susp": -1.726353
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 30.319979,
+            "susp": -1.726073
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 25.269962,
+            "susp": -2.134304
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 25.269962,
+            "susp": -2.133982
+          }
+        ],
+        "c1a": [
+          0.0,
+          1.152664,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": false,
+        "c1p": [
+          321.991425,
+          0.0,
+          31.970793
+        ],
+        "c1r": [
+          -1437.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1250.938721,
+          0.0,
+          87.096588
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 101.130501,
+            "susp": 6.633392
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 101.130486,
+            "susp": 6.633693
+          },
+          {
+            "contact": false,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "spin": 83.224724,
+            "susp": 12.0
+          },
+          {
+            "contact": false,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "spin": 83.224731,
+            "susp": 12.0
+          }
+        ],
+        "t": 22
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          0.123684,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          105.552765,
+          0.0,
+          16.998346
+        ],
+        "c0r": [
+          -61.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          375.666504,
+          0.0,
+          -1.337919
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 29.938129,
+            "susp": -1.790455
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 29.938129,
+            "susp": -1.790175
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 24.95191,
+            "susp": -2.108525
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 24.95191,
+            "susp": -2.108209
+          }
+        ],
+        "c1a": [
+          0.0,
+          1.162796,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": false,
+        "c1p": [
+          332.39859,
+          0.0,
+          32.629242
+        ],
+        "c1r": [
+          -1539.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1248.748657,
+          0.0,
+          78.966232
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 100.924034,
+            "susp": 6.848672
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 100.924026,
+            "susp": 6.848979
+          },
+          {
+            "contact": false,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "spin": 82.739227,
+            "susp": 12.0
+          },
+          {
+            "contact": false,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "spin": 82.739235,
+            "susp": 12.0
+          }
+        ],
+        "t": 23
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          0.104982,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          108.64621,
+          0.0,
+          16.988346
+        ],
+        "c0r": [
+          -70.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          371.286407,
+          0.0,
+          -1.132952
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 29.558434,
+            "susp": -1.846266
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 29.558434,
+            "susp": -1.845983
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 24.635386,
+            "susp": -2.088208
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 24.635384,
+            "susp": -2.08789
+          }
+        ],
+        "c1a": [
+          0.0,
+          1.173712,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": false,
+        "c1p": [
+          342.785492,
+          0.0,
+          33.217678
+        ],
+        "c1r": [
+          -1641.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1246.558594,
+          0.0,
+          70.836067
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 100.717064,
+            "susp": 6.993055
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 100.717041,
+            "susp": 6.99336
+          },
+          {
+            "contact": false,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "spin": 82.256569,
+            "susp": 12.0
+          },
+          {
+            "contact": false,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "spin": 82.256577,
+            "susp": 12.0
+          }
+        ],
+        "t": 24
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          0.087546,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          111.70134,
+          0.0,
+          16.978344
+        ],
+        "c0r": [
+          -77.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          366.906311,
+          0.0,
+          -0.899635
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 29.18133,
+            "susp": -1.894882
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 29.181328,
+            "susp": -1.894602
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 24.32085,
+            "susp": -2.072628
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 24.320848,
+            "susp": -2.072306
+          }
+        ],
+        "c1a": [
+          0.0,
+          1.185329,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": false,
+        "c1p": [
+          353.152496,
+          0.0,
+          33.737766
+        ],
+        "c1r": [
+          -1744.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1244.36853,
+          0.0,
+          62.705811
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 100.509254,
+            "susp": 7.065362
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 100.509247,
+            "susp": 7.065666
+          },
+          {
+            "contact": false,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "spin": 81.776726,
+            "susp": 12.0
+          },
+          {
+            "contact": false,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "spin": 81.776733,
+            "susp": 12.0
+          }
+        ],
+        "t": 25
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          0.071711,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          114.724777,
+          0.0,
+          16.969999
+        ],
+        "c0r": [
+          -84.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          362.526215,
+          0.0,
+          -0.646321
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 28.807236,
+            "susp": -1.936319
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 28.807236,
+            "susp": -1.936039
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 24.008715,
+            "susp": -2.061786
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 24.008711,
+            "susp": -2.061467
+          }
+        ],
+        "c1a": [
+          0.0,
+          1.197645,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": false,
+        "c1p": [
+          363.501038,
+          0.0,
+          34.196194
+        ],
+        "c1r": [
+          -1848.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1242.178467,
+          0.0,
+          54.575649
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 100.300514,
+            "susp": 7.075542
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 100.300507,
+            "susp": 7.075849
+          },
+          {
+            "contact": false,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "spin": 81.299683,
+            "susp": 12.0
+          },
+          {
+            "contact": false,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "spin": 81.29969,
+            "susp": 12.0
+          }
+        ],
+        "t": 26
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          0.057491,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          117.70829,
+          0.0,
+          16.969999
+        ],
+        "c0r": [
+          -89.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          358.145996,
+          0.0,
+          -0.38293
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 28.435923,
+            "susp": -1.961693
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 28.435921,
+            "susp": -1.961413
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 23.698843,
+            "susp": -2.044965
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 23.698843,
+            "susp": -2.044647
+          }
+        ],
+        "c1a": [
+          0.0,
+          1.210678,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": false,
+        "c1p": [
+          373.838196,
+          0.0,
+          34.584621
+        ],
+        "c1r": [
+          -1953.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1239.988403,
+          0.0,
+          46.44529
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 100.090706,
+            "susp": 7.012767
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 100.090706,
+            "susp": 7.013071
+          },
+          {
+            "contact": false,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "spin": 80.825417,
+            "susp": 12.0
+          },
+          {
+            "contact": false,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "spin": 80.825424,
+            "susp": 12.0
+          }
+        ],
+        "t": 27
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          0.044989,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          120.653419,
+          0.0,
+          16.969999
+        ],
+        "c0r": [
+          -93.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          353.765869,
+          0.0,
+          -0.159379
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 28.067568,
+            "susp": -1.981544
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 28.067568,
+            "susp": -1.981264
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 23.391436,
+            "susp": -2.031802
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 23.391432,
+            "susp": -2.03148
+          }
+        ],
+        "c1a": [
+          0.0,
+          1.224494,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": false,
+        "c1p": [
+          384.155212,
+          0.0,
+          34.903046
+        ],
+        "c1r": [
+          -2059.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1237.79834,
+          0.0,
+          38.315037
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 99.879791,
+            "susp": 6.876719
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 99.879784,
+            "susp": 6.877026
+          },
+          {
+            "contact": false,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "spin": 80.35392,
+            "susp": 12.0
+          },
+          {
+            "contact": false,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "spin": 80.353928,
+            "susp": 12.0
+          }
+        ],
+        "t": 28
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          0.034286,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          123.566956,
+          0.0,
+          16.969999
+        ],
+        "c0r": [
+          -96.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          349.38562,
+          0.0,
+          0.026663
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 27.702063,
+            "susp": -1.996982
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 27.702063,
+            "susp": -1.996702
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 23.086428,
+            "susp": -2.021556
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 23.086428,
+            "susp": -2.021237
+          }
+        ],
+        "c1a": [
+          0.0,
+          1.239027,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": false,
+        "c1p": [
+          394.452484,
+          0.0,
+          35.153122
+        ],
+        "c1r": [
+          -2167.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1235.608276,
+          0.0,
+          30.184578
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 99.667572,
+            "susp": 6.667089
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 99.667557,
+            "susp": 6.667411
+          },
+          {
+            "contact": false,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "spin": 79.885162,
+            "susp": 12.0
+          },
+          {
+            "contact": false,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "spin": 79.88517,
+            "susp": 12.0
+          }
+        ],
+        "t": 29
+      },
+      {
+        "ba": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bp": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bv": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "c0a": [
+          0.0,
+          0.025334,
+          0.0
+        ],
+        "c0bo": 100.0,
+        "c0ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c0dm": false,
+        "c0og": true,
+        "c0p": [
+          126.440453,
+          0.0,
+          16.969999
+        ],
+        "c0r": [
+          -98.0,
+          0.0,
+          0.0
+        ],
+        "c0state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c0v": [
+          345.005432,
+          0.0,
+          0.184192
+        ],
+        "c0wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 27.33927,
+            "susp": -2.008563
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 27.339268,
+            "susp": -2.008277
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 22.78373,
+            "susp": -2.013873
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 22.78373,
+            "susp": -2.013554
+          }
+        ],
+        "c1a": [
+          0.0,
+          1.254344,
+          0.0
+        ],
+        "c1bo": 100.0,
+        "c1ctl": {
+          "bo": false,
+          "hb": false,
+          "j": false,
+          "p": 0.0,
+          "r": 0.0,
+          "st": 0.0,
+          "th": 0.0,
+          "y": 0.0
+        },
+        "c1dm": false,
+        "c1og": false,
+        "c1p": [
+          404.729614,
+          0.0,
+          35.341534
+        ],
+        "c1r": [
+          -2276.0,
+          0.0,
+          0.0
+        ],
+        "c1state": {
+          "air_time": 0.0,
+          "air_time_since_jump": 0.0,
+          "dodge_torque": [
+            -0.0,
+            0.0,
+            0.0
+          ],
+          "double_jumped": false,
+          "flip_time": 0.0,
+          "is_flipping": false,
+          "is_jumping": false,
+          "jump_time": 0.0,
+          "jumped": false,
+          "supersonic": false
+        },
+        "c1v": [
+          1233.418213,
+          0.0,
+          22.054222
+        ],
+        "c1wheels": [
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 99.453957,
+            "susp": 6.393218
+          },
+          {
+            "contact": true,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "spin": 99.453949,
+            "susp": 6.39354
+          },
+          {
+            "contact": false,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "spin": 79.419144,
+            "susp": 12.0
+          },
+          {
+            "contact": false,
+            "fci": 0.0,
+            "normal": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "spin": 79.419151,
+            "susp": 12.0
+          }
+        ],
+        "t": 30
+      }
+    ]
+  }
+}

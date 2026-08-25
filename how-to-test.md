@@ -2586,6 +2586,45 @@ receiving a copy of a car 3 200 UU away jumps hugely, then jumps back -- and
 `has_discontinuity` was already voiding them on displacement. The fix above caught
 the smooth *interior* of each collapse, which is what displacement could not see.
 
+## Live Differential Runner
+
+`scripts/rl_live_diff.py` closes the loop between scripted scenarios, the live
+Rocket League BakkesMod plugin, and this Rust simulator. It sends scenarios to
+`physlog_tcp_start`, saves the exact request and response, runs RocketSim from
+the same initial state and controls, then ranks per-field divergence against
+Rocket League. The saved capture is sufficient to reproduce the Rust side
+without launching the game again.
+
+```bash
+# In Rocket League freeplay first:
+#   plugin load PhysicsLogger
+#   physlog_tcp_start
+
+# One named scenario, including Bullet contact manifolds:
+python scripts/rl_live_diff.py --name ball_bounce_ground --contacts
+
+# Add stock C++ RocketSim against the same captured RL trajectory:
+python scripts/rl_live_diff.py --name ball_bounce_ground --contacts --cpp
+
+# Sweep initial ball height to move impact through sub-tick phases:
+python scripts/rl_live_diff.py --name ball_bounce_ground \
+  --sweep ball.p.2=90:110:1 --contacts
+
+# Re-evaluate a saved capture after changing Rust physics (no live game):
+python scripts/rl_live_diff.py \
+  --capture live_diff/20260824-120000/ball_bounce_ground.capture.json
+```
+
+Each `*.capture.json` contains `{request,response}` with the full RL trace.
+Each `*.diff.json` contains mean/p95/max errors and the highest-error individual
+ticks with predicted and expected vectors. Controls are applied before the step;
+the corresponding response state is post-physics at 120 Hz. This matches the
+RLPR harness's destination-tick control convention.
+
+The TCP v8 response includes controls, wheel state, hook events, and manifold
+geometry. `pts[].imp` remains an unverified memory-offset candidate; the runner
+does not use it as ground truth.
+
 ## Rollout Mode (RLROLL) — compounding errors
 
 The per-tick pass restores full state every tick, so it only ever measures one
