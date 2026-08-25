@@ -109,7 +109,10 @@ impl ContactAddedCallback for ArenaContactTracker {
             };
             manifold_point.combined_friction = hit_coefs.friction;
             manifold_point.combined_restitution = hit_coefs.restitution;
-        } else if user_idx_a == UserInfoTypes::Ball && user_idx_b == UserInfoTypes::None {
+        } else if user_idx_a == UserInfoTypes::Ball
+            && user_idx_b == UserInfoTypes::None
+            && body_b.is_static_obj()
+        {
             manifold_point.is_special = true;
         }
 
