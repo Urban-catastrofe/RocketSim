@@ -6,6 +6,7 @@ use crate::bullet::{
         manifold_point::ManifoldPoint,
         persistent_manifold::{
             CONTACT_BREAKING_THRESHOLD, ContactAddedCallback, ContactSolveInfo, PersistentManifold,
+            SpecialContactSolveInfo, SpecialContactSolvePoint,
         },
     },
     dynamics::rigid_body::{CollisionFlags, RigidBody},
@@ -204,7 +205,13 @@ impl SeqImpulseConstraintSolver {
         time_step: f32,
         contact_callback: &mut T,
     ) {
-        self.solve_group_setup(collision_objs, non_static_bodies, manifolds, time_step);
+        self.solve_group_setup(
+            collision_objs,
+            non_static_bodies,
+            manifolds,
+            time_step,
+            contact_callback.tracks_special_contacts(),
+        );
         self.solve_group_iterations();
         self.solve_group_finish(collision_objs, time_step, contact_callback);
     }
@@ -215,6 +222,7 @@ impl SeqImpulseConstraintSolver {
         non_static_bodies: &[usize],
         manifolds: &mut Vec<PersistentManifold>,
         time_step: f32,
+        track_special_contacts: bool,
     ) {
         self.setup_solver_bodies(collision_objs, non_static_bodies);
 
@@ -303,7 +311,7 @@ impl SeqImpulseConstraintSolver {
 
         if self.special_resolve_info.num_special_collisions > 0 {
             let body = &mut collision_objs[self.special_resolve_info.obj_idx];
-            self.convert_contact_special(body, time_step);
+            self.convert_contact_special(body, time_step, track_special_contacts);
             self.special_resolve_info.reset();
         }
     }
@@ -341,7 +349,12 @@ impl SeqImpulseConstraintSolver {
         }
     }
 
-    fn convert_contact_special(&mut self, body: &RigidBody, time_step: f32) {
+    fn convert_contact_special(
+        &mut self,
+        body: &RigidBody,
+        time_step: f32,
+        track_special_contacts: bool,
+    ) {
         let sri = &self.special_resolve_info;
         let num_collisions = f32::from(sri.num_special_collisions);
         let distance = sri.total_dist / num_collisions;
@@ -434,6 +447,25 @@ impl SeqImpulseConstraintSolver {
                 (vel_impulse, penetration_impulse)
             };
 
+        let special_contact_info = track_special_contacts.then(|| SpecialContactSolveInfo {
+            points: sri
+                .special_contacts
+                .iter()
+                .map(|contact| SpecialContactSolvePoint {
+                    pos_world_on_b: contact.pos_world_on_b,
+                    normal_world_on_b: contact.normal_world_on_b,
+                    distance: contact.distance,
+                })
+                .collect(),
+            effective_normal: normal_world_on_b,
+            mean_penetration,
+            restitution_velocity: restitution,
+            normal_impulse: 0.0,
+            push_impulse: 0.0,
+            relative_velocity_before: vel,
+            relative_velocity_after: Vec3A::ZERO,
+        });
+
         self.tmp_solver_contact_constraint_pool
             .push(SolverConstraint {
                 solver_body_id_a,
@@ -445,6 +477,9 @@ impl SeqImpulseConstraintSolver {
                 rhs,
                 rhs_penetration,
                 friction: sri.friction,
+                body_idx_a: sri.obj_idx,
+                rel_pos_a: rel_pos1,
+                special_contact_info,
                 lower_limit: 0.0,
                 upper_limit: 1e10,
                 ..Default::default()
@@ -611,6 +646,15 @@ impl SeqImpulseConstraintSolver {
         contact_callback: &mut T,
     ) {
         for contact in &self.tmp_solver_contact_constraint_pool {
+            if let Some(mut info) = contact.special_contact_info.clone() {
+                let solver_body = &self.tmp_solver_body_pool[contact.solver_body_id_a];
+                info.normal_impulse = contact.applied_impulse;
+                info.push_impulse = contact.applied_push_impulse;
+                info.relative_velocity_after =
+                    solver_body.get_vel_in_local_point_with_delta(contact.rel_pos_a);
+                contact_callback.special_contact_solved(info, &collision_objs[contact.body_idx_a]);
+                continue;
+            }
             let Some(manifold_point) = contact.manifold_point else {
                 continue;
             };

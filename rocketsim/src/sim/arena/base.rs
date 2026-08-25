@@ -837,6 +837,18 @@ impl Arena {
         self.contact_tracker.solved_car_ball_contacts()
     }
 
+    /// Enables retained ball-world solver diagnostics. Disabled by default to
+    /// avoid allocating contact traces in normal simulation.
+    pub fn set_ball_world_contact_tracking(&mut self, enabled: bool) {
+        self.contact_tracker.set_track_ball_world_contacts(enabled);
+    }
+
+    /// Returns the aggregate ball-world constraints solved during the last tick.
+    #[must_use]
+    pub fn get_last_step_ball_world_contacts(&self) -> &[crate::BallWorldConstraintInfo] {
+        self.contact_tracker.solved_ball_world_contacts()
+    }
+
     #[must_use]
     /// Cast N rays in the arena
     ///

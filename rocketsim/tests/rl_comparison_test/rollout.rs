@@ -99,6 +99,12 @@ pub struct RolloutReport {
     pub rollouts_measured: u64,
     /// Rollouts cut short by a recording discontinuity or the end of the file.
     pub rollouts_truncated: u64,
+    /// Ball samples omitted because the recording's own position and velocity
+    /// channels contradict each other for that step.
+    pub ball_samples_voided: u64,
+    /// The per-tick ground-truth audit rejected this recording's whole ball
+    /// channel (for example, because it is persistently embedded in the mesh).
+    pub ball_ground_truth_rejected: bool,
     pub entities: Vec<RolloutEntityReport>,
 }
 
@@ -126,6 +132,8 @@ impl RolloutReport {
             num_cars,
             rollouts_measured: 0,
             rollouts_truncated: 0,
+            ball_samples_voided: 0,
+            ball_ground_truth_rejected: false,
             entities,
         }
     }
@@ -133,6 +141,8 @@ impl RolloutReport {
     fn merge(&mut self, other: RolloutReport) {
         self.rollouts_measured += other.rollouts_measured;
         self.rollouts_truncated += other.rollouts_truncated;
+        self.ball_samples_voided += other.ball_samples_voided;
+        self.ball_ground_truth_rejected |= other.ball_ground_truth_rejected;
         for (mine, theirs) in self.entities.iter_mut().zip(other.entities) {
             mine.merge(theirs);
         }
@@ -150,12 +160,18 @@ fn controls_for(to_tick: &super::recording::tick_record::TickRecord, buf: &mut V
 /// Rollout worker for one shard of start ticks. Owns its arena so shards can
 /// run on separate threads; each start tick restores full state, so rollouts
 /// are independent.
-fn run_rollout_shard(recording: &Recording, shard: &[usize], cfg: &HarnessConfig) -> RolloutReport {
+fn run_rollout_shard(
+    recording: &Recording,
+    shard: &[usize],
+    cfg: &HarnessConfig,
+    score_ball: bool,
+) -> RolloutReport {
     let num_cars = recording.info.num_cars as usize;
     let stride = recording.stride;
     let rollout_ticks = cfg.rollout_ticks;
     let (mut arena, car_idcs) = runner::make_arena(num_cars);
     let mut report = RolloutReport::new(recording.name.clone(), recording, cfg);
+    report.ball_ground_truth_rejected = !score_ball;
     let mut controls_buf: Vec<CarControls> = vec![CarControls::DEFAULT; num_cars];
     // Last measured per-entity field magnitudes for the current rollout, used
     // to update the worst-end tracker once the rollout's length is known.
@@ -166,6 +182,7 @@ fn run_rollout_shard(recording: &Recording, shard: &[usize], cfg: &HarnessConfig
     let mut warmed = false;
 
     for &i in shard {
+        last_mag.fill([f32::NAN; Field::ALL.len()]);
         let bound = recording.ticks.len();
         if i + stride >= bound {
             continue;
@@ -229,7 +246,14 @@ fn run_rollout_shard(recording: &Recording, shard: &[usize], cfg: &HarnessConfig
                 ent.state.record(&cs, real);
             }
 
-            if !runner::is_ball_sentinel(&to_tick.ball_record) {
+            let ball_impossible = score_ball
+                && !runner::is_ball_sentinel(&to_tick.ball_record)
+                && runner::ball_record_impossible(
+                    &recording.ticks[target - stride],
+                    to_tick,
+                    stride,
+                );
+            if score_ball && !runner::is_ball_sentinel(&to_tick.ball_record) && !ball_impossible {
                 let ball_state: &BallState = arena.get_ball_state();
                 let delta = compute_delta(&ball_state.phys, &to_tick.ball_record);
                 let ball_ent = &mut report.entities[report.num_cars];
@@ -239,6 +263,8 @@ fn run_rollout_shard(recording: &Recording, shard: &[usize], cfg: &HarnessConfig
                     fr.per_step[k - 1].add(s.mag, s.signed, i);
                     last_mag[report.num_cars][field_index(field)] = s.mag;
                 }
+            } else if ball_impossible {
+                report.ball_samples_voided += 1;
             }
 
             last_step = k;
@@ -262,7 +288,7 @@ fn run_rollout_shard(recording: &Recording, shard: &[usize], cfg: &HarnessConfig
                 for field in Field::ALL {
                     let fi = field_index(field);
                     let fr = report.entities[ei].field_mut(field);
-                    if mags[fi] > fr.worst_end_mag {
+                    if mags[fi].is_finite() && mags[fi] > fr.worst_end_mag {
                         fr.worst_end_mag = mags[fi];
                         fr.worst_end_start = i;
                     }
@@ -275,7 +301,7 @@ fn run_rollout_shard(recording: &Recording, shard: &[usize], cfg: &HarnessConfig
 }
 
 /// Rollout mode, sharded across `cfg.threads` workers.
-pub fn run_rollout(recording: &Recording, cfg: &HarnessConfig) -> RolloutReport {
+pub fn run_rollout(recording: &Recording, cfg: &HarnessConfig, score_ball: bool) -> RolloutReport {
     let stride = recording.stride;
     let n = runner::loop_bound(recording, None);
     let starts: Vec<usize> = (0..=n).step_by(cfg.rollout_stride * stride).collect();
@@ -290,7 +316,7 @@ pub fn run_rollout(recording: &Recording, cfg: &HarnessConfig) -> RolloutReport 
         cfg.threads.clamp(1, starts.len())
     };
     if threads <= 1 {
-        return run_rollout_shard(recording, &starts, cfg);
+        return run_rollout_shard(recording, &starts, cfg, score_ball);
     }
 
     let mut merged = RolloutReport::new(recording.name.clone(), recording, cfg);
@@ -298,7 +324,7 @@ pub fn run_rollout(recording: &Recording, cfg: &HarnessConfig) -> RolloutReport 
     std::thread::scope(|s| {
         let handles: Vec<_> = starts
             .chunks(chunk)
-            .map(|shard| s.spawn(move || run_rollout_shard(recording, shard, cfg)))
+            .map(|shard| s.spawn(move || run_rollout_shard(recording, shard, cfg, score_ball)))
             .collect();
         for handle in handles {
             merged.merge(handle.join().expect("rollout shard panicked"));
@@ -329,7 +355,7 @@ pub fn rollout_lines(report: &RolloutReport, cfg: &HarnessConfig) -> Vec<String>
     let horizons = sample_horizons(report.rollout_ticks);
 
     lines.push(format!(
-        "==== ROLLOUT {} | free-run {}t ({:.2}s) from {} starts (stride {}) | rollouts={} truncated={} ====",
+        "==== ROLLOUT {} | free-run {}t ({:.2}s) from {} starts (stride {}) | rollouts={} truncated={} ball_samples_voided={}{} ====",
         report.name,
         report.rollout_ticks,
         report.rollout_ticks as f64 / 120.0,
@@ -337,6 +363,12 @@ pub fn rollout_lines(report: &RolloutReport, cfg: &HarnessConfig) -> Vec<String>
         report.rollout_stride,
         report.rollouts_measured,
         report.rollouts_truncated,
+        report.ball_samples_voided,
+        if report.ball_ground_truth_rejected {
+            " ball_REJECTED"
+        } else {
+            ""
+        },
     ));
 
     let focused: Vec<usize> = match cfg.car_focus {

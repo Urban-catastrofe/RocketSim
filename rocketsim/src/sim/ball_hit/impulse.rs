@@ -35,13 +35,32 @@ pub fn can_fire(state: &BallHitState, config: &BallHitConfig, tick_count: u64) -
         HitCadence::EveryOtherTick => spacing_ok,
         // Once the ball has had a tick without contact, the episode is over
         // and the impulse may re-arm.
-        HitCadence::OncePerEpisode => {
+        HitCadence::OncePerEpisode | HitCadence::TransientFollowUp => {
             spacing_ok
                 && state
                     .last_contact_tick
                     .is_none_or(|last| last + 1 < tick_count)
         }
     }
+}
+
+/// Whether the default cadence may emit its one bounded follow-up impulse.
+pub fn can_fire_transient_follow_up(
+    state: &BallHitState,
+    config: &BallHitConfig,
+    tick_count: u64,
+    car_is_on_ground: bool,
+    car_is_boosting: bool,
+    throttle: f32,
+) -> bool {
+    config.cadence == HitCadence::TransientFollowUp
+        && state
+            .last_impulse_tick
+            .is_some_and(|last| last + 2 == tick_count)
+        && state.last_contact_tick == tick_count.checked_sub(1)
+        && car_is_on_ground
+        && !car_is_boosting
+        && throttle.abs() < config.follow_up_max_throttle
 }
 
 /// Compute the extra hit impulse (delta-velocity, UU units) for one contact.
@@ -83,7 +102,7 @@ mod tests {
     use crate::sim::ball_hit::config::{BallHitConfig, HitCadence};
     use crate::sim::ball_hit::state::BallHitState;
 
-    use super::{HitContext, can_fire, compute_impulse};
+    use super::{HitContext, can_fire, can_fire_transient_follow_up, compute_impulse};
 
     // Ball directly in front of the car (slightly above center), car driving
     // forward into it.
@@ -161,5 +180,29 @@ mod tests {
         st.last_contact_tick = Some(9);
         st.last_impulse_tick = Some(5);
         assert!(can_fire(&st, &cfg, 11));
+    }
+
+    #[test]
+    fn transient_follow_up_is_bounded_and_excludes_active_pushes() {
+        let cfg = BallHitConfig::default();
+        let mut state = BallHitState::DEFAULT;
+        state.last_impulse_tick = Some(10);
+        state.last_contact_tick = Some(11);
+
+        assert!(can_fire_transient_follow_up(
+            &state, &cfg, 12, true, false, 0.3
+        ));
+        assert!(!can_fire_transient_follow_up(
+            &state, &cfg, 12, true, false, 0.5
+        ));
+        assert!(!can_fire_transient_follow_up(
+            &state, &cfg, 12, true, true, 0.3
+        ));
+        assert!(!can_fire_transient_follow_up(
+            &state, &cfg, 12, false, false, 0.3
+        ));
+        assert!(!can_fire_transient_follow_up(
+            &state, &cfg, 14, true, false, 0.3
+        ));
     }
 }

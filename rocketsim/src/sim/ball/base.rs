@@ -307,14 +307,28 @@ impl Ball {
         // separated last tick?) so the once-per-episode cadence can fire on
         // the first contact tick of a fresh episode. Update the contact
         // bookkeeping after the check.
-        if crate::sim::ball_hit::can_fire(&self.state.ball_hit, &self.hit_config, tick_count) {
+        let initial_fire =
+            crate::sim::ball_hit::can_fire(&self.state.ball_hit, &self.hit_config, tick_count);
+        let transient_follow_up = crate::sim::ball_hit::can_fire_transient_follow_up(
+            &self.state.ball_hit,
+            &self.hit_config,
+            tick_count,
+            car.state.is_on_ground,
+            car.state.controls.boost,
+            car.state.controls.throttle,
+        );
+        if initial_fire || transient_follow_up {
             let impulse = crate::sim::ball_hit::compute_impulse(&ctx, &self.hit_config);
             if impulse != Vec3A::ZERO {
                 // Queue for the *end of this tick* (see `finish_physics_tick`),
                 // matching C++ `_FinishPhysicsTick`.
                 self.pending_hit_impulse +=
                     impulse * mutator_config.ball_hit_extra_force_scale * UU_TO_BT;
-                self.state.ball_hit.last_impulse_tick = Some(tick_count);
+                // Keep the original tick after a follow-up so this condition
+                // cannot re-arm every other frame during sustained contact.
+                if initial_fire {
+                    self.state.ball_hit.last_impulse_tick = Some(tick_count);
+                }
             }
         }
 

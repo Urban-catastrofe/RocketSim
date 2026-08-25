@@ -16,6 +16,25 @@ pub struct ContactSolveInfo {
     pub relative_velocity_after: Vec3A,
 }
 
+#[derive(Debug, Clone)]
+pub struct SpecialContactSolvePoint {
+    pub pos_world_on_b: Vec3A,
+    pub normal_world_on_b: Vec3A,
+    pub distance: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct SpecialContactSolveInfo {
+    pub points: Vec<SpecialContactSolvePoint>,
+    pub effective_normal: Vec3A,
+    pub mean_penetration: f32,
+    pub restitution_velocity: f32,
+    pub normal_impulse: f32,
+    pub push_impulse: f32,
+    pub relative_velocity_before: Vec3A,
+    pub relative_velocity_after: Vec3A,
+}
+
 pub trait ContactAddedCallback {
     fn callback(
         &mut self,
@@ -32,6 +51,12 @@ pub trait ContactAddedCallback {
         _body_b: &RigidBody,
     ) {
     }
+
+    fn tracks_special_contacts(&self) -> bool {
+        false
+    }
+
+    fn special_contact_solved(&mut self, _contact: SpecialContactSolveInfo, _body: &RigidBody) {}
 }
 
 pub const CONTACT_BREAKING_THRESHOLD: f32 = 0.02;

@@ -68,6 +68,17 @@ extra-impulse ticks, geometric gap, and center-velocity closing speed.
 RLRESID=7 cargo test -p rocketsim case_car_ball_pop_stationary -- --nocapture --test-threads=1
 ```
 
+`RLRESID=12` runs the same complete-episode measurement and also probes each
+transition from restored RL state. Its `EPPHASE` row separates continuous
+contact loss from cadence: a tick in `lost_contacts` was detected when restored
+but disappeared from the free-running trajectory, so no extra-hit cadence can
+fire there. Aggregate the focused car-ball suite with:
+
+```bash
+RLRESID=12 cargo test -p rocketsim case_car_ball_ -- --nocapture --test-threads=1 > car-ball-phase.log 2>&1
+python scripts/rl_contact_phase.py car-ball-phase.log
+```
+
 ## Hit-Trigger Audit (RLRESID=11) - v3 recordings only
 
 `RLRESID=11` compares the game's `OnHitBall` labels with the sim's car-ball
@@ -90,6 +101,7 @@ production defaults:
 
 ```bash
 RL_HIT_CADENCE=other RLRESID=7 cargo test -p rocketsim case_car_ball_soft_touch -- --nocapture --test-threads=1
+RL_HIT_CADENCE=once RLRESID=7 cargo test -p rocketsim case_car_ball_soft_touch -- --nocapture --test-threads=1
 RL_BALL_HIT_SCALE=0 RLRESID=7 cargo test -p rocketsim case_car_ball_soft_touch -- --nocapture --test-threads=1
 RL_CONTACT_STATE_SLACK=1.825 RLGATE=off cargo test -p rocketsim case_car_ball_soft_touch -- --nocapture --test-threads=1
 ```
@@ -100,10 +112,12 @@ The extra hit impulse lives in `rocketsim/src/sim/ball_hit/` as a pure,
 config-driven module:
 
 - `config.rs` — `BallHitConfig` (all tunables: z_scale, forward_scale, factor
-  curve, max_delta_vel) + `HitCadence` enum (`EveryTick` / `EveryOtherTick` /
-  `OncePerEpisode`). The production default is `OncePerEpisode`; legacy C++
-  cadence is available as `EveryOtherTick` for calibration.
-- `impulse.rs` — `compute_impulse` (pure) + `can_fire` (cadence check).
+  curve, max_delta_vel, follow-up throttle) + `HitCadence` enum (`EveryTick` /
+  `EveryOtherTick` / `OncePerEpisode` / `TransientFollowUp`). The production
+  default is `TransientFollowUp`; strict one-shot and legacy every-other cadence
+  remain available for calibration.
+- `impulse.rs` — `compute_impulse` (pure), `can_fire`, and the bounded transient
+  follow-up predicate.
 - `state.rs` — `BallHitState` (last impulse tick, last contact tick).
 
 The impulse is a *pure function of the config* and the hit geometry, so the
@@ -114,16 +128,24 @@ recordings, watch the ball vel p95 move.
 **end of the contact tick** in `finish_physics_tick` (matching C++
 `_FinishPhysicsTick`). Previously it was queued to `pre_tick_update` of the
 next tick, which the per-tick restore harness wiped before it ever fired — the
-sim's car-ball hits were permanently missing the carried impulse. The default
-cadence is `OncePerEpisode` (one impulse per contact, re-armed after the ball
-separates). The game often spreads a hit over **2 ticks**, and some three-frame
-contact episodes need a second impulse after one skipped frame. For example,
-`EveryOtherTick` reduces complete soft-touch episode error from 51.8 to 0.2
-UU/s. It cannot be enabled globally: in paired 0.5-second rollouts it improves
-soft-touch ball velocity error from 103.10 to 0.14 UU/s but regresses slow push
-from 2.90 to 38.93 UU/s. Contact-normal, car-to-ball centerline, and relative-
-speed gates do not separate those regimes safely. Delaying that cadence also
-produces 60-80 UU/s drift in roof, push, dribble, and pop cases. Per-tick cases dominated by the split
+sim's car-ball hits were permanently missing the carried impulse. Rocket League
+often spreads a hit over **2 ticks**, and some three-frame contact episodes need
+a second impulse after one skipped frame. Global `EveryOtherTick` cannot be
+enabled: it fixes soft touch but regresses sustained push, roof, dribble and pop
+rollouts.
+
+The production `TransientFollowUp` policy keeps one impulse per episode, then
+allows exactly one follow-up two ticks later only when contact was continuous,
+the car is grounded and not boosting, and `|throttle| < 0.5`. It does not update
+the original impulse tick, so it cannot re-arm repeatedly. Against strict
+`OncePerEpisode`, complete soft-touch errors improve `99.3/55.9 -> 0.3/0.2`
+UU/s; the full 55-episode mean improves `61.89 -> 59.08`. At 0.5 seconds the
+focused car-ball aggregate improves ball velocity `31.32 -> 30.44`, position
+`8.84 -> 8.50`, and angular velocity `0.0878 -> 0.0847`. Every strict per-tick
+car/ball pass/fail count is identical. The only non-target rollout movement is
+ground-dribble `+0.004` UU/s velocity and `+0.002` UU position.
+
+Per-tick cases dominated by the split
 (`car_ball_backwall_car_ball_approach`, `mech_flip_reset_simple`) score
 slightly worse per-tick even though the *total* impulse matches the game. The
 2-tick split is **not safely modelable by a global cadence or delay** (verified
@@ -188,15 +210,57 @@ velocity changes. Collision filters, disabled contact response, multiple cars,
 and impacts redirected by earlier solves are preserved. Snowday's convex puck
 continues to use the discrete path.
 
-The focused result is useful but mixed. Slow-push episode 86 now keeps contacts
-on ticks `[86, 87, 88]` instead of `[86, 87]`, and its third-frame gap falls from
-`2.97` to `1.45` UU. Across all slow-push episodes, however, mean impulse gap is
-effectively flat (`28.6 -> 28.5 UU/s`). At 0.5 seconds, mean slow-push ball
-velocity error improves `41.22 -> 40.37 UU/s` while mean position error moves
-`6.45 -> 6.61 UU`; soft-touch velocity improves `18.43 -> 18.25 UU/s` while
-position moves `5.84 -> 6.25 UU`. The full 452-case comparison suite still
-passes. Treat TOI as a phase-correct collision primitive, not a replacement for
-the unresolved multi-frame `OnHitBall` cadence model.
+The implementation is intentionally disabled in production. Re-running the
+dedicated 55-episode `RLRESID=12` census confirms why: enabling actual-touch TOI
+raises endpoint-gap mass from **3404.2 to 4840.2 UU/s (+42.2%)** and increases
+continuous contact-loss episodes from 6 to 16. Moving TOI outward to the same
+speculative threshold as discrete narrowphase is less bad but still regresses
+the mass to **3882.3 (+14.0%)** and contact losses to 12. Neither variant recovers
+`aerial_hit_diagonal`, while both start wall, pinch and backboard responses a
+frame early. The normal pipeline already performs an initial discrete solve;
+replacing it with a sub-frame solver is therefore a measured regression, not a
+missing architectural step.
+
+The worst remaining aerial miss is wheel-led, not a body-solver miss. At
+`aerial_hit_diagonal` t18 an airborne wheel ray reaches the ball two ticks before
+`OnHitBall`; `RLLEDGER=2` attributes mean/max car deltas of **34.35/66.42 UU/s**
+to wheel suspension there, versus about 1 UU/s from wheel friction. Reducing
+dynamic-body suspension to `0.94` turns the missed `791.6` outcome into `29.3`
+UU/s and improves all focused episode-gap mass `3404.2 -> 2640.6` (-22.4%), but
+it is a grazing threshold bifurcation: `0.945` misses completely, and `0.94`
+regresses flip-reset/car-from-below controls plus 5 ball-velocity, 15 car-
+velocity and 19 car-position strict samples. Zero dynamic suspension and an
+equal-and-opposite two-body suspension impulse were also tested; they leave
+`451` and `577` UU/s respectively. All variants were reverted. Do not encode a
+dynamic-suspension scalar from this recording. The next useful evidence is RL's
+actual wheel-to-ball force/event semantics, not another global solver schedule.
+
+The initial focused result was useful but mixed. One TOI probe kept slow-push
+episode 86 in contact for a third frame and reduced its gap from `2.97` to `1.45`
+UU, but the aggregate mean impulse gap was effectively flat (`28.6 -> 28.5
+UU/s`). At 0.5 seconds, mean slow-push ball velocity error improved `41.22 ->
+40.37 UU/s` while mean position error moved `6.45 -> 6.61 UU`; soft-touch
+velocity improved `18.43 -> 18.25 UU/s` while position moved `5.84 -> 6.25 UU`.
+The full 452-case comparison suite still passed. Treat TOI as a phase-correct
+collision primitive, not a replacement for the unresolved multi-frame
+`OnHitBall` cadence model.
+
+The dedicated continuous/restored comparison sharpens that conclusion. Across
+55 measurable `car_ball_*` episodes, six lose a game-contact tick only during
+continuous simulation, carrying **1550.5 UU/s (45.5%)** of endpoint-gap mass.
+The two largest are `aerial_hit_diagonal` (**791.6**) and
+`curve_car_ball_hit` (**427.7**). Slow-push episodes 86, 232 and 301 have the
+same signature. These are contact-phase/trajectory failures, not cadence
+failures. Soft-touch episodes 12 and 176 are the contrasting positive control:
+continuous contact survives all three frames, and `EveryOtherTick` changes
+their endpoint errors from **99.3/55.9 to 0.3/0.2 UU/s**. Keep those two classes
+separate when changing car-ball response.
+
+Across all 55 episodes, global `EveryOtherTick` only moves mean endpoint error
+`61.89 -> 59.08 UU/s` (**-4.5%**) because the dominant contact-loss episodes
+never reach a tick where cadence can act. Its longer sustained-rollout
+regressions therefore buy very little complete-event accuracy. Fix onset and
+trajectory loss before revisiting the second impulse.
 
 ## Ground-Truth Validation
 
@@ -1762,7 +1826,7 @@ order/quantization, often acceptable.
 | `RLCENSUS` | `1` error-mass census by cause; `2` also lists each bucket's worst steps; `3` sub-bands by speed + handbrake state; `4` by `friction_curve_input`; `5` by suspension compression; `6` by compression x compression rate; `7` 1-UU compression bands with a quiet suspension | off |
 | `RLCTRLOFF` | shift which tick the census reads controls from (`-1`/`0`/`+1`), to re-verify control alignment | `0` |
 | `RLLATDUMP` | `1` to emit one `LATROW` per flat-floor zero-steer step: RL's own lateral friction impulse and the sim's, with per-wheel slip ratio and side impulse. See `latdump.rs` | off |
-| `RLBALL` | `1` census of ball velocity error by contact cause; `2` liveness survey of the ball's world-contact fields plus a position-vs-velocity audit of the recording itself; `3` per-step `BALLDUMP`; `4` `BALLBOUNCE`, judging a bounce by its outcome across a free rollout with tick alignment; `5` every individual ball-world contact point for `RLBALL_REC` over `RLBALL_T=lo:hi`; `6` `BALLRESP`/`BALLNRM`, the sim's contact response against RL's banded by the ball's gap to the surface; `7` `BALLTRUTH`, per-step ground-truth audit of what survives the harness's existing voids; `8` `BALLMESH`/`BALLMESHSUM`, sweep every recorded ball position for arena-mesh penetration; `9` `BALLCORNER`, walk the ball out along `x = y` to map where the corner mesh actually is. See `ballcensus.rs` | off |
+| `RLBALL` | `1` census of ball velocity error by contact cause; `2` liveness survey of the ball's world-contact fields plus a position-vs-velocity audit of the recording itself; `3` per-step `BALLDUMP`; `4` `BALLBOUNCE`, judging a bounce by its outcome across a free rollout with tick alignment; `5` every individual ball-world contact point for `RLBALL_REC` over `RLBALL_T=lo:hi`; `6` `BALLRESP`/`BALLNRM`, the sim's contact response against RL's banded by the ball's gap to the surface; `7` `BALLTRUTH`, per-step ground-truth audit of what survives the harness's existing voids; `8` `BALLMESH`/`BALLMESHSUM`, sweep every recorded ball position for arena-mesh penetration; `9` `BALLCORNER`, walk the ball out along `x = y` to map where the corner mesh actually is; `10` car-ball hit sub-frame audit; `11` `BALLSOLVE`, retained/deduplicated ball-world constraints and applied solver impulses. See `ballcensus.rs` | off |
 | `RLFLIP` | `1` to emit one `FLIPZ` row per isolated airborne flip step: RL's own z-damp decision on the closed vertical axis, with `flip_time`, tumble, `up.z` and both boost orderings. Filter to `0.35*|vzF| > 20` before reading. See `flipdamp.rs` | off |
 | `RLCENSUS` (`10`) | band every bucket by the recorded jump/flip state and `flip_time` phase | off |
 | `RLCARC` (`4`) | survey car-identity transpositions after an array collapse (`CARCSWAP`). Zero suite-wide; kept as a ruled-out hypothesis | off |
@@ -2079,8 +2143,12 @@ visible in one dump. `ball_goal_crossbar_drop_from_above` enters the goal at
 **241** uu/s of `+y`, then 301 on the next tick, then stops. The sim answers
 with a near-pure `-y` wall normal `(0, -0.999, -0.044)` and reverses the ball
 outright, `+1487 -> -360` -- roughly 19% of a bounce, delivered as 100% of one.
-The sim's contact count explodes there too: up to **304 `BallHitWorld` events in
-a 10-tick window** at `ball_goal_post_base_left`.
+The event count appears to explode there too: up to **304 `BallHitWorld` events
+in a 10-tick window** at `ball_goal_post_base_left`. Those are contact-added
+callbacks for triangle candidates, including points immediately evicted from
+Bullet's four-point persistent manifold. They are not 304 solver constraints.
+Solver-side tracing found at most four retained points per manifold (and five
+across simultaneous manifolds in the worst goal-base examples).
 
 Note the contact normals in `BALLDUMP` are the *pre*-adjustment values.
 `ArenaContactTracker::callback` deliberately pushes its record **before**
@@ -2089,6 +2157,58 @@ prints is the raw narrowphase normal and not necessarily what the solver used.
 Do not conclude the internal-edge machinery is missing from a tilted normal in
 a dump -- it is present and is a faithful port of
 `btAdjustInternalEdgeContacts`.
+
+The concrete missing path was between the broadphase and narrowphase. The
+broadphase already unions the sphere's current and predicted AABBs, but
+`sphere_concave_collision_alg` tested candidate triangles only against the
+current centre. Fast balls therefore crossed the thin front post/crossbar rim
+without producing a solver contact on RL's impact tick. A conservative swept
+sphere/triangle test now fills that gap for entering Soccar rim contacts.
+
+The sweep is deliberately narrower than generic CCD. Resolving at the tick
+boundary is only validated for front-facing motion of at most one quarter ball
+radius per tick. Tangential base contacts, points outside the outer post, low
+post-base contacts, and central crossbar contacts with no vertical crossing
+stay on the established discrete path. Positive-gap crossbar-margin contacts
+are discarded instead of receiving a full restitution impulse.
+
+Matched `RLBALL=4` A/B results over all 476 scripted bounces:
+
+| metric | before | after |
+|---|---:|---:|
+| mean aligned outcome error | 40.92 uu/s | **35.65 uu/s** |
+| outcomes over 100 uu/s | 54 | **51** |
+| non-target outcome regressions over 0.1 uu/s | | **0** |
+
+Large goal-frame changes include top-right junction `912.1 -> 0.3`, glancing
+posts `446-448 -> 8-9`, crossbar-with-spin `476.1 -> 0.4`, and the separated
+crossbar-drop case `936.3 -> 305.2` uu/s. Straight-post outcomes improve from
+about `642 -> 6` uu/s, although their strict per-tick maximum gets worse because
+RL spreads the impulse over two recorded ticks while the sim resolves it in one;
+the aligned outcome is the relevant metric. The post base remains unresolved:
+its retained set mixes floor, post side, front face and rounded-frame normals.
+Splitting those into independent restitution constraints and penetration-
+weighting the aggregate were both tested and rejected because they regress the
+full bounce suite.
+
+`RLBALL=11` makes that diagnosis reproducible by reporting the contacts that
+survive manifold retention and special-contact deduplication, the aggregate
+normal/restitution target, and applied normal/push impulses:
+
+```bash
+RLBALL=11 cargo test -p rocketsim case_ball_goal_post_base_ -- --nocapture --test-threads=1
+RLBALL=11 cargo test -p rocketsim case_ball_goal_crossbar_drop_from_above -- --nocapture --test-threads=1
+```
+
+At `ball_goal_post_base_left` t6 the 86 callback candidates become five retained
+contacts spanning floor, sidewall and oblique frame normals. Their single
+averaged constraint produces `2210` UU/s against RL's `1793`; at t7 three
+incompatible normals produce `1133` against `403`. At crossbar-drop t6, five
+retained backwall/ceiling/oblique points produce `555` against `334`. This is
+the support-cone case for one restitution owner plus zero-restitution supports.
+Crossbar-drop t115 is a separate control: it retains only one point and
+under-produces `306` against `593`, so changing multi-contact ownership cannot
+solve it.
 
 #### Match replay ball records cannot grade anything
 

@@ -2,7 +2,10 @@ use glam::Vec3A;
 
 use super::{contact_solver_info, solver_body::SolverBody};
 use crate::bullet::{
-    collision::narrowphase::manifold_point::ManifoldPoint, dynamics::rigid_body::RigidBody,
+    collision::narrowphase::{
+        manifold_point::ManifoldPoint, persistent_manifold::SpecialContactSolveInfo,
+    },
+    dynamics::rigid_body::RigidBody,
 };
 
 fn bullet_dot(vec0: Vec3A, vec1: Vec3A) -> f32 {
@@ -35,6 +38,7 @@ pub struct SolverConstraint {
     pub rel_pos_a: Vec3A,
     pub rel_pos_b: Vec3A,
     pub manifold_point: Option<ManifoldPoint>,
+    pub special_contact_info: Option<SpecialContactSolveInfo>,
     pub relative_velocity_before: Vec3A,
 }
 

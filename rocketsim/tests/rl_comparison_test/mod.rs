@@ -108,7 +108,7 @@ fn test_recording(recording: &Recording) {
 
     // RLBALL=1: error-mass census for the ball, by contact cause.
     // RLBALL=2: liveness survey of the ball's world-contact fields.
-    // RLBALL=3: per-step dump. See ballcensus.rs.
+    // RLBALL=3: per-step dump; RLBALL=11: retained solver contacts. See ballcensus.rs.
     match std::env::var("RLBALL").as_deref() {
         Ok("2") => {
             ballcensus::survey(recording);
@@ -140,6 +140,10 @@ fn test_recording(recording: &Recording) {
         }
         Ok("10") => {
             ballcensus::hit_subframe_audit(recording);
+            return;
+        }
+        Ok("11") => {
+            ballcensus::constraint_study(recording);
             return;
         }
         Ok(_) => {
@@ -201,7 +205,7 @@ fn test_recording(recording: &Recording) {
                 residual::analyze_impulse(recording);
                 return;
             }
-            "7" => {
+            "7" | "12" => {
                 residual::analyze_impulse_gap(recording);
                 return;
             }
@@ -262,7 +266,8 @@ fn test_recording(recording: &Recording) {
     if cfg.cpp_compare {
         #[cfg(feature = "cpp-compare")]
         {
-            let mut cpp_report = cpp_runner::run_cpp_per_tick(recording, &cfg);
+            let mut cpp_report =
+                cpp_runner::run_cpp_per_tick(recording, &cfg, !report.ball_ground_truth_rejected);
             let mut cpp_cfg = cfg.clone();
             cpp_cfg.gate = GateMode::Off;
             cpp_cfg.deep_dive = DeepDiveMode::Never;
@@ -298,13 +303,14 @@ fn test_recording(recording: &Recording) {
 
     // ── Rollout mode (RLROLL=1s / 2s / <ticks>): compounding-error growth ──
     if cfg.rollout_ticks > 0 {
-        let rollout_report = rollout::run_rollout(recording, &cfg);
+        let score_ball = !report.ball_ground_truth_rejected;
+        let rollout_report = rollout::run_rollout(recording, &cfg, score_ball);
         for line in rollout::rollout_lines(&rollout_report, &cfg) {
             println!("{line}");
         }
         #[cfg(feature = "cpp-compare")]
         if cfg.cpp_compare {
-            let cpp_rollout = cpp_runner::run_cpp_rollout(recording, &cfg);
+            let cpp_rollout = cpp_runner::run_cpp_rollout(recording, &cfg, score_ball);
             for line in rollout::rollout_lines(&cpp_rollout, &cfg) {
                 println!("{line}");
             }

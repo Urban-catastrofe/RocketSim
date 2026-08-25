@@ -339,7 +339,7 @@ fn flag_proxy(cs: &CarState) -> rocketsim::CarState {
 
 /// Per-tick restore pass through the C++ sim. Single-threaded: the C++ arena
 /// (and bullet behind it) is driven from one thread only.
-pub fn run_cpp_per_tick(recording: &Recording, _cfg: &HarnessConfig) -> Report {
+pub fn run_cpp_per_tick(recording: &Recording, _cfg: &HarnessConfig, score_ball: bool) -> Report {
     init_cpp();
 
     let num_cars = recording.info.num_cars as usize;
@@ -353,13 +353,33 @@ pub fn run_cpp_per_tick(recording: &Recording, _cfg: &HarnessConfig) -> Report {
         num_cars,
         starts.len(),
     );
+    report.ball_ground_truth_rejected = !score_ball;
     if starts.is_empty() {
         return report;
     }
 
     let (mut arena, car_ids) = make_cpp_arena(num_cars);
     let mut controls_buf: Vec<CarControls> = vec![CarControls::default(); num_cars];
-    let mut warmup_left = runner::SHARD_WARMUP_TICKS;
+
+    // Match the Rust pass: repeatedly restore and step one valid transition so
+    // warmup does not consume real samples or shift the comparison population.
+    if let Some(&first) = starts
+        .iter()
+        .find(|&&i| !runner::has_discontinuity(recording, i, stride))
+    {
+        let from_tick = &recording.ticks[first];
+        for (j, car_record) in recording.ticks[first + stride]
+            .car_records
+            .iter()
+            .enumerate()
+        {
+            controls_buf[j] = controls(car_record.prev_controls);
+        }
+        for _ in 0..runner::SHARD_WARMUP_TICKS {
+            set_cpp_state_to_record_tick(&mut arena, &car_ids, from_tick, &controls_buf);
+            arena.pin_mut().step(1);
+        }
+    }
 
     for &i in &starts {
         if runner::has_discontinuity(recording, i, stride) {
@@ -376,14 +396,13 @@ pub fn run_cpp_per_tick(recording: &Recording, _cfg: &HarnessConfig) -> Report {
         set_cpp_state_to_record_tick(&mut arena, &car_ids, from_tick, &controls_buf);
         arena.pin_mut().step(1);
 
-        if warmup_left > 0 {
-            warmup_left -= 1;
-            continue;
-        }
-
         for (j, &car_id) in car_ids.iter().enumerate() {
             let real = &to_tick.car_records[j];
             if real.is_demoed || runner::is_car_sentinel(&real.phys) {
+                continue;
+            }
+            if recording.step_straddles_impulse(i, stride, j) {
+                report.impulse_steps_skipped += 1;
                 continue;
             }
             let cs = arena.pin_mut().get_car(car_id);
@@ -401,7 +420,11 @@ pub fn run_cpp_per_tick(recording: &Recording, _cfg: &HarnessConfig) -> Report {
             ent.state.record(&proxy, real);
         }
 
-        if !runner::is_ball_sentinel(&to_tick.ball_record) {
+        if !score_ball || runner::is_ball_sentinel(&to_tick.ball_record) {
+            // Nothing to score.
+        } else if runner::ball_record_impossible(from_tick, to_tick, stride) {
+            report.ball_steps_voided += 1;
+        } else {
             let bs = arena.pin_mut().get_ball();
             let phys = ball_phys(&bs);
             let delta = compute_delta(&phys, &to_tick.ball_record);
@@ -422,7 +445,11 @@ pub fn run_cpp_per_tick(recording: &Recording, _cfg: &HarnessConfig) -> Report {
 /// C++ twin of [`super::rollout::run_rollout`]: restore at sampled start
 /// ticks, free-run the C++ sim for `rollout_ticks` steps with recorded
 /// controls, and capture the same error-growth curve. Single-threaded.
-pub fn run_cpp_rollout(recording: &Recording, cfg: &HarnessConfig) -> RolloutReport {
+pub fn run_cpp_rollout(
+    recording: &Recording,
+    cfg: &HarnessConfig,
+    score_ball: bool,
+) -> RolloutReport {
     init_cpp();
 
     let stride = recording.stride;
@@ -432,6 +459,7 @@ pub fn run_cpp_rollout(recording: &Recording, cfg: &HarnessConfig) -> RolloutRep
     let starts: Vec<usize> = (0..=n).step_by(cfg.rollout_stride * stride).collect();
 
     let mut report = RolloutReport::new(format!("{}|cpp", recording.name), recording, cfg);
+    report.ball_ground_truth_rejected = !score_ball;
     if starts.is_empty() || rollout_ticks == 0 {
         return report;
     }
@@ -442,6 +470,7 @@ pub fn run_cpp_rollout(recording: &Recording, cfg: &HarnessConfig) -> RolloutRep
     let mut warmed = false;
 
     for &i in &starts {
+        last_mag.fill([f32::NAN; Field::ALL.len()]);
         let bound = recording.ticks.len();
         if i + stride >= bound {
             continue;
@@ -494,7 +523,14 @@ pub fn run_cpp_rollout(recording: &Recording, cfg: &HarnessConfig) -> RolloutRep
                 ent.state.record(&proxy, real);
             }
 
-            if !runner::is_ball_sentinel(&to_tick.ball_record) {
+            let ball_impossible = score_ball
+                && !runner::is_ball_sentinel(&to_tick.ball_record)
+                && runner::ball_record_impossible(
+                    &recording.ticks[target - stride],
+                    to_tick,
+                    stride,
+                );
+            if score_ball && !runner::is_ball_sentinel(&to_tick.ball_record) && !ball_impossible {
                 let bs = arena.pin_mut().get_ball();
                 let phys = ball_phys(&bs);
                 let delta = compute_delta(&phys, &to_tick.ball_record);
@@ -506,6 +542,8 @@ pub fn run_cpp_rollout(recording: &Recording, cfg: &HarnessConfig) -> RolloutRep
                     fr.per_step[k - 1].add(s.mag, s.signed, i);
                     last_mag[report.num_cars][super::measure::field_index(field)] = s.mag;
                 }
+            } else if ball_impossible {
+                report.ball_samples_voided += 1;
             }
 
             last_step = k;
@@ -530,7 +568,7 @@ pub fn run_cpp_rollout(recording: &Recording, cfg: &HarnessConfig) -> RolloutRep
                 for field in Field::ALL {
                     let fi = super::measure::field_index(field);
                     let fr = report.entities[ei].field_mut(field);
-                    if mags[fi] > fr.worst_end_mag {
+                    if mags[fi].is_finite() && mags[fi] > fr.worst_end_mag {
                         fr.worst_end_mag = mags[fi];
                         fr.worst_end_start = i;
                     }

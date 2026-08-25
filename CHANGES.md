@@ -16,6 +16,15 @@ replay suite (470 cases, 120 Hz, BakkesMod logger).
 
 ## Accuracy fixes (most recent first)
 
+### ball: bounded transient car-hit follow-up
+`rocketsim/src/sim/ball_hit/` — the default cadence now permits one follow-up
+extra impulse two ticks after the first only for continuous, grounded,
+non-boosting contacts below 0.5 absolute throttle. This captures RL's
+three-frame soft touch without enabling legacy every-other-tick impulses during
+sustained pushes. Soft-touch endpoint errors improve 99.3/55.9 -> 0.3/0.2 UU/s;
+the 55-episode mean improves 61.89 -> 59.08. Focused 0.5-second ball velocity
+improves 31.32 -> 30.44 UU/s, with all strict per-tick counts unchanged.
+
 ### ball: clamp angular velocity to BALL_MAX_ANG_SPEED (6.0 rad/s)
 `rocketsim/src/sim/ball/base.rs` — `finish_physics_tick` now clamps the ball's
 angular velocity to `consts::ball::MAX_ANG_SPEED` (6.0) and its linear velocity

@@ -6,7 +6,9 @@ use crate::{
             dispatch::internal_edge_utility::adjust_internal_edge_contacts,
             narrowphase::{
                 manifold_point::ManifoldPoint,
-                persistent_manifold::{ContactAddedCallback, ContactSolveInfo},
+                persistent_manifold::{
+                    ContactAddedCallback, ContactSolveInfo, SpecialContactSolveInfo,
+                },
             },
         },
         dynamics::rigid_body::RigidBody,
@@ -42,10 +44,31 @@ pub struct CarBallContactInfo {
     pub relative_velocity_after: glam::Vec3A,
 }
 
+#[derive(Debug, Clone)]
+pub struct BallWorldContactPointInfo {
+    pub contact_point: glam::Vec3A,
+    pub contact_normal: glam::Vec3A,
+    pub distance: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct BallWorldConstraintInfo {
+    pub points: Vec<BallWorldContactPointInfo>,
+    pub effective_normal: glam::Vec3A,
+    pub mean_penetration: f32,
+    pub restitution_velocity: f32,
+    pub normal_impulse: f32,
+    pub push_impulse: f32,
+    pub relative_velocity_before: glam::Vec3A,
+    pub relative_velocity_after: glam::Vec3A,
+}
+
 // A struct to be accessed through the bullet contact callbacks
 pub(crate) struct ArenaContactTracker {
     collision_records: Vec<ContactRecord>,
     solved_car_ball_contacts: Vec<CarBallContactInfo>,
+    solved_ball_world_contacts: Vec<BallWorldConstraintInfo>,
+    track_ball_world_contacts: bool,
 }
 
 impl ArenaContactTracker {
@@ -53,6 +76,8 @@ impl ArenaContactTracker {
         Self {
             collision_records: Vec::with_capacity(4), // Rarely exceeded
             solved_car_ball_contacts: Vec::with_capacity(4),
+            solved_ball_world_contacts: Vec::with_capacity(1),
+            track_ball_world_contacts: false,
         }
     }
 
@@ -74,6 +99,15 @@ impl ArenaContactTracker {
 
     pub fn clear_solved_contacts(&mut self) {
         self.solved_car_ball_contacts.clear();
+        self.solved_ball_world_contacts.clear();
+    }
+
+    pub fn set_track_ball_world_contacts(&mut self, enabled: bool) {
+        self.track_ball_world_contacts = enabled;
+    }
+
+    pub fn solved_ball_world_contacts(&self) -> &[BallWorldConstraintInfo] {
+        &self.solved_ball_world_contacts
     }
 }
 
@@ -156,5 +190,34 @@ impl ContactAddedCallback for ArenaContactTracker {
             relative_velocity_before: contact.relative_velocity_before * direction * BT_TO_UU,
             relative_velocity_after: contact.relative_velocity_after * direction * BT_TO_UU,
         });
+    }
+
+    fn tracks_special_contacts(&self) -> bool {
+        self.track_ball_world_contacts
+    }
+
+    fn special_contact_solved(&mut self, contact: SpecialContactSolveInfo, body: &RigidBody) {
+        if body.user_idx != UserInfoTypes::Ball {
+            return;
+        }
+        self.solved_ball_world_contacts
+            .push(BallWorldConstraintInfo {
+                points: contact
+                    .points
+                    .into_iter()
+                    .map(|point| BallWorldContactPointInfo {
+                        contact_point: point.pos_world_on_b * BT_TO_UU,
+                        contact_normal: point.normal_world_on_b,
+                        distance: point.distance * BT_TO_UU,
+                    })
+                    .collect(),
+                effective_normal: contact.effective_normal,
+                mean_penetration: contact.mean_penetration * BT_TO_UU,
+                restitution_velocity: contact.restitution_velocity * BT_TO_UU,
+                normal_impulse: contact.normal_impulse,
+                push_impulse: contact.push_impulse,
+                relative_velocity_before: contact.relative_velocity_before * BT_TO_UU,
+                relative_velocity_after: contact.relative_velocity_after * BT_TO_UU,
+            });
     }
 }

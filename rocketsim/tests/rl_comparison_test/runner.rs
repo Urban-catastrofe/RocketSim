@@ -432,9 +432,10 @@ pub fn make_arena(num_cars: usize) -> (Arena, Vec<usize>) {
         let mut config = *arena.ball_hit_config();
         config.cadence = match cadence.as_str() {
             "once" => HitCadence::OncePerEpisode,
+            "transient" => HitCadence::TransientFollowUp,
             "other" => HitCadence::EveryOtherTick,
             "every" => HitCadence::EveryTick,
-            _ => panic!("RL_HIT_CADENCE must be once, other, or every"),
+            _ => panic!("RL_HIT_CADENCE must be once, transient, other, or every"),
         };
         arena.set_ball_hit_config(config);
     }

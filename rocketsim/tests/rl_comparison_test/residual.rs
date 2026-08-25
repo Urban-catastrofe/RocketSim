@@ -702,12 +702,14 @@ fn cadence_label() -> &'static str {
     match std::env::var("RL_HIT_CADENCE").as_deref() {
         Ok("other") => "other",
         Ok("every") => "every",
-        // The production default (`HitCadence::OncePerEpisode`).
-        _ => "once",
+        Ok("once") => "once",
+        // The production default (`HitCadence::TransientFollowUp`).
+        _ => "transient",
     }
 }
 
 pub fn analyze_impulse_gap(recording: &Recording) {
+    let trace_contact_phase = std::env::var("RLRESID").as_deref() == Ok("12");
     let num_cars = recording.info.num_cars as usize;
     let stride = recording.stride;
     let mut gap_sum = Vec3A::ZERO;
@@ -900,6 +902,59 @@ pub fn analyze_impulse_gap(recording: &Recording) {
             gap.z,
             gap.length(),
         );
+        if trace_contact_phase {
+            // Contrast the continuous episode above with the same individual
+            // transitions restored from RL state. A tick present only in the
+            // restored set is a contact-lifetime/trajectory loss, not a cadence
+            // decision: no cadence can fire after continuous simulation has
+            // already dropped the contact.
+            let (mut restored_arena, restored_car_idcs) = make_arena(num_cars);
+            let mut restored_contacts = Vec::new();
+            let mut restored_fires = Vec::new();
+            for target in ((start + stride)..=end).step_by(stride) {
+                for (j, car) in recording.ticks[target].car_records.iter().enumerate() {
+                    controls_buf[j] = car.prev_controls.into();
+                }
+                set_state_to_record_tick(
+                    &mut restored_arena,
+                    &restored_car_idcs,
+                    &recording.ticks[target - stride],
+                    target
+                        .checked_sub(2 * stride)
+                        .map(|tick| &recording.ticks[tick]),
+                    &controls_buf,
+                );
+                restored_arena.step_tick();
+                for event in restored_arena.get_last_step_events() {
+                    if let ArenaEvent::CarHitBall(hit) = event {
+                        restored_contacts.push(target);
+                        if hit.extra_hit_vel != Vec3A::ZERO {
+                            restored_fires.push(target);
+                        }
+                    }
+                }
+            }
+            restored_contacts.sort_unstable();
+            restored_contacts.dedup();
+            restored_fires.sort_unstable();
+            restored_fires.dedup();
+            let game_ticks: Vec<usize> = (onset_start..=last_hit)
+                .step_by(stride)
+                .filter(|&tick| has_hit(tick))
+                .collect();
+            let lost_contacts: Vec<usize> = game_ticks
+                .iter()
+                .copied()
+                .filter(|tick| {
+                    restored_contacts.contains(tick) && !sim_contact_ticks.contains(tick)
+                })
+                .collect();
+            println!(
+                "EPPHASE {} ep={onset_start}..{last_hit} game={game_ticks:?} continuous_contacts={sim_contact_ticks:?} continuous_fires={sim_fire_ticks:?} restored_contacts={restored_contacts:?} restored_fires={restored_fires:?} lost_contacts={lost_contacts:?} endpoint_gap={:.4}",
+                recording.name,
+                gap.length(),
+            );
+        }
         // Machine-readable twin of the line above, for suite-wide aggregation
         // (`scripts/rl_episode_gap.py`). Same convention as `LEDGER`: one line
         // per measured unit, `key=value`, vectors comma-separated. Fields are

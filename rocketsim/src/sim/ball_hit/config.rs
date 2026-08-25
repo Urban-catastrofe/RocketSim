@@ -10,11 +10,9 @@ use crate::sim::linear_piece_curve::LinearPieceCurve;
 /// How often the extra ball-hit impulse may fire while the ball stays in
 /// contact with a car.
 ///
-/// The default is `OncePerEpisode`: RL delivers one extra impulse per contact,
-/// not one per contact tick. `EveryOtherTick` is what C++ RocketSim does and
-/// what this port used to do; it scores far worse on sustained contact
-/// (`car_ball_soft_touch` 55.8 vs 6.5 UU/s). The other variants are kept so the
-/// calibration loop can re-test each cadence against the recordings.
+/// The default is `TransientFollowUp`: one impulse per contact, plus one
+/// tightly-gated follow-up for RL's low-throttle three-frame soft touch.
+/// `EveryOtherTick` is the legacy behavior and repeats indefinitely.
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HitCadence {
@@ -25,6 +23,8 @@ pub enum HitCadence {
     /// One impulse per contact episode — re-arms only after the ball has
     /// separated from the car for at least one tick.
     OncePerEpisode,
+    /// `OncePerEpisode` plus one bounded low-throttle follow-up.
+    TransientFollowUp,
 }
 
 /// All tunable constants for the car-ball extra hit impulse.
@@ -47,6 +47,8 @@ pub struct BallHitConfig {
     pub factor_curve: LinearPieceCurve<4>,
     /// How often the impulse may fire during sustained contact.
     pub cadence: HitCadence,
+    /// Follow-up impulses require absolute throttle below this value.
+    pub follow_up_max_throttle: f32,
 }
 
 impl Default for BallHitConfig {
@@ -60,7 +62,8 @@ impl Default for BallHitConfig {
             forward_scale: car_hit_impulse::FORWARD_SCALE,
             max_delta_vel_uu: car_hit_impulse::MAX_DELTA_VEL_UU,
             factor_curve: curves::BALL_CAR_EXTRA_IMPULSE_FACTOR,
-            cadence: HitCadence::OncePerEpisode,
+            cadence: HitCadence::TransientFollowUp,
+            follow_up_max_throttle: 0.5,
         }
     }
 }

@@ -20,6 +20,7 @@
 //!   normal would be Rocket League's own answer for the one quantity a bounce
 //!   turns on.
 //! - `RLBALL=3` -- per-bounce dump: one row per measured ball step.
+//! - `RLBALL=11` -- retained ball-world solver constraints and applied impulses.
 
 use std::collections::BTreeMap;
 
@@ -47,6 +48,106 @@ const MISS_THRESHOLD: f32 = 10.0;
 const SELF_CONSISTENCY_TOL: f32 = 5.0;
 /// Gravity's contribution to one tick of velocity, 650 / 120.
 const GRAV_DV: f32 = 650.0 / 120.0;
+
+/// `RLBALL=11`: trace the contacts that survive manifold retention and special
+/// deduplication, plus the aggregate constraint that actually reaches the
+/// solver. Unlike `BALLPT`, this does not count transient triangle candidates.
+pub fn constraint_study(recording: &Recording) {
+    let num_cars = recording.info.num_cars as usize;
+    let stride = recording.stride;
+    let (mut arena, car_idcs) = make_arena(num_cars);
+    arena.set_ball_world_contact_tracking(true);
+    let mut controls_buf: Vec<CarControls> = vec![CarControls::DEFAULT; num_cars];
+
+    let last = recording.ticks.len().saturating_sub(stride + 1);
+    for i in (0..=last).step_by(stride) {
+        if has_discontinuity(recording, i, stride) {
+            continue;
+        }
+        let from_tick = &recording.ticks[i];
+        let to_tick = &recording.ticks[i + stride];
+        if is_sentinel(&from_tick.ball_record) || is_sentinel(&to_tick.ball_record) {
+            continue;
+        }
+        for (j, car_record) in to_tick.car_records.iter().enumerate() {
+            controls_buf[j] = car_record.prev_controls.into();
+        }
+        set_state_to_record_tick(
+            &mut arena,
+            &car_idcs,
+            from_tick,
+            i.checked_sub(stride).map(|t| &recording.ticks[t]),
+            &controls_buf,
+        );
+
+        let before = arena.get_ball_state().phys.vel;
+        let candidate_count = arena
+            .step_tick()
+            .iter()
+            .filter(|event| matches!(event, ArenaEvent::BallHitWorld(_)))
+            .count();
+        let after = arena.get_ball_state().phys.vel;
+        let rl_impulse = Vec3A::from(to_tick.ball_record.lin_vel)
+            - Vec3A::from(from_tick.ball_record.lin_vel)
+            - Vec3A::new(0.0, 0.0, -GRAV_DV);
+        let sim_impulse = after - before - Vec3A::new(0.0, 0.0, -GRAV_DV);
+
+        for (constraint_idx, contact) in
+            arena.get_last_step_ball_world_contacts().iter().enumerate()
+        {
+            let mut classes: BTreeMap<&str, usize> = BTreeMap::new();
+            for point in &contact.points {
+                *classes
+                    .entry(normal_class(point.contact_normal))
+                    .or_default() += 1;
+            }
+            let angle = if sim_impulse.length() > 1.0 && rl_impulse.length() > 1.0 {
+                sim_impulse
+                    .normalize()
+                    .dot(rl_impulse.normalize())
+                    .clamp(-1.0, 1.0)
+                    .acos()
+                    .to_degrees()
+            } else {
+                f32::NAN
+            };
+            let pre_n = contact
+                .relative_velocity_before
+                .dot(contact.effective_normal);
+            let post_n = contact
+                .relative_velocity_after
+                .dot(contact.effective_normal);
+            println!(
+                "BALLSOLVE {} t{i} c={constraint_idx} candidates={candidate_count} retained={} classes={classes:?} mean_depth={:.2} aggregate_n=({:.3},{:.3},{:.3}) pre_n={pre_n:.1} post_n={post_n:.1} restitution={:.1} impulse={:.4} push={:.4} sim_dv={:.1} rl_dv={:.1} angle={angle:.1}",
+                recording.name,
+                contact.points.len(),
+                contact.mean_penetration,
+                contact.effective_normal.x,
+                contact.effective_normal.y,
+                contact.effective_normal.z,
+                contact.restitution_velocity,
+                contact.normal_impulse,
+                contact.push_impulse,
+                sim_impulse.length(),
+                rl_impulse.length(),
+            );
+            for (point_idx, point) in contact.points.iter().enumerate() {
+                println!(
+                    "BALLSOLVEPT {} t{i} c={constraint_idx} p={point_idx} class={} depth={:.2} n=({:.3},{:.3},{:.3}) pos=({:.1},{:.1},{:.1})",
+                    recording.name,
+                    normal_class(point.contact_normal),
+                    point.distance,
+                    point.contact_normal.x,
+                    point.contact_normal.y,
+                    point.contact_normal.z,
+                    point.contact_point.x,
+                    point.contact_point.y,
+                    point.contact_point.z,
+                );
+            }
+        }
+    }
+}
 
 #[derive(Default)]
 struct Bucket {
@@ -224,26 +325,16 @@ pub fn response_study(recording: &Recording) {
         // base averages 58 distinct normals into a direction 35 degrees off the
         // impulse RL actually applied. These are the alternatives worth testing
         // against RL's own impulse direction.
-        let per_point_gap =
-            |pt: Vec3A| -> f32 { (pt - p).length() - BALL_RADIUS };
+        let per_point_gap = |pt: Vec3A| -> f32 { (pt - p).length() - BALL_RADIUS };
         // Deepest contact: the most negative signed gap.
         let deepest = pts
             .iter()
-            .min_by(|a, b| {
-                per_point_gap(a.0)
-                    .partial_cmp(&per_point_gap(b.0))
-                    .unwrap()
-            })
+            .min_by(|a, b| per_point_gap(a.0).partial_cmp(&per_point_gap(b.0)).unwrap())
             .map_or(Vec3A::ZERO, |&(_, n)| n);
         // The surface the ball is driving into hardest.
         let most_opposed = pts
             .iter()
-            .min_by(|a, b| {
-                v_before
-                    .dot(a.1)
-                    .partial_cmp(&v_before.dot(b.1))
-                    .unwrap()
-            })
+            .min_by(|a, b| v_before.dot(a.1).partial_cmp(&v_before.dot(b.1)).unwrap())
             .map_or(Vec3A::ZERO, |&(_, n)| n);
         // The mean over distinct normals, so duplicate points stop acting as
         // weights: at the crossbar one point was reported eight times.
@@ -376,10 +467,7 @@ pub fn point_dump(recording: &Recording) {
 
         let from = &from_tick.ball_record;
         let to = &recording.ticks[i + stride].ball_record;
-        let mean = pts
-            .iter()
-            .fold(Vec3A::ZERO, |a, &(_, n)| a + n)
-            / pts.len() as f32;
+        let mean = pts.iter().fold(Vec3A::ZERO, |a, &(_, n)| a + n) / pts.len() as f32;
         let rl_dv = Vec3A::from(to.lin_vel) - Vec3A::from(from.lin_vel);
         println!(
             "BALLPT {} t{i} np={} meannrm=({:.3},{:.3},{:.3}) |meannrm|={:.3} rldv=({:.1},{:.1},{:.1}) rldir=({:.3},{:.3},{:.3}) ballpos=({:.1},{:.1},{:.1})",
