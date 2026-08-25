@@ -694,6 +694,19 @@ pub fn analyze_impulse(recording: &Recording) {
 // episode (enough to close a sub-frame contact gap) through one tick after it
 // and compare the complete velocity change.
 
+/// The car-ball hit cadence this run is measuring, so a paired baseline vs
+/// `RL_HIT_CADENCE=other` run is self-labelling in the log rather than relying
+/// on whoever saved the file to remember which was which. `make_arena` owns the
+/// validation; this only names the value.
+fn cadence_label() -> &'static str {
+    match std::env::var("RL_HIT_CADENCE").as_deref() {
+        Ok("other") => "other",
+        Ok("every") => "every",
+        // The production default (`HitCadence::OncePerEpisode`).
+        _ => "once",
+    }
+}
+
 pub fn analyze_impulse_gap(recording: &Recording) {
     let num_cars = recording.info.num_cars as usize;
     let stride = recording.stride;
@@ -703,6 +716,7 @@ pub fn analyze_impulse_gap(recording: &Recording) {
     let mut gap_mag_sum = 0.0f32;
     let mut n = 0u32;
     let mut unmeasurable = 0u32;
+    let mut no_ball = 0u32;
 
     let has_hit = |i: usize| {
         recording.ticks[i]
@@ -768,6 +782,21 @@ pub fn analyze_impulse_gap(recording: &Recording) {
             continue;
         }
 
+        // No ball in this scenario, so there is no car-ball impulse to measure.
+        // The logger parks an absent ball far below the arena and leaves it
+        // there, while the sim free-falls the restored sentinel for the whole
+        // window -- which reads as ~13 580 UU/s of "impulse error" identical
+        // across every car-only recording, and as 23 of the suite's 24 worst
+        // episodes. `car.hit.has_hit` is set on these ticks too, so the episode
+        // detector above cannot filter them; the ball's own pose is what says
+        // there is nothing here to measure.
+        if is_ball_sentinel(&recording.ticks[start].ball_record)
+            || is_ball_sentinel(&recording.ticks[end].ball_record)
+        {
+            no_ball += 1;
+            continue;
+        }
+
         if (start..end)
             .step_by(stride)
             .any(|i| super::runner::has_discontinuity(recording, i, stride))
@@ -805,6 +834,14 @@ pub fn analyze_impulse_gap(recording: &Recording) {
         let mut sim_contact_ticks = Vec::new();
         let mut sim_fire_ticks = Vec::new();
         let mut sim_gaps = Vec::new();
+        // Worst ball-velocity disagreement *inside* the window, against the
+        // window-end gap below. The end-of-window gap has the episode's phase
+        // divided out (both engines have delivered the whole impulse by then);
+        // the intra-window peak still contains it. The two together are what
+        // separate a cadence-phase defect from a wrong impulse: see
+        // `EPGAP`/`phase_share` in `scripts/rl_episode_gap.py`.
+        let mut peak_err = 0.0f32;
+        let mut peak_err_tick = start;
         for target in ((start + stride)..=end).step_by(stride) {
             for (j, &car_idx) in car_idcs.iter().enumerate() {
                 arena.set_car_controls(
@@ -834,6 +871,14 @@ pub fn analyze_impulse_gap(recording: &Recording) {
                 .min_by(|a, b| a.0.total_cmp(&b.0))
                 .unwrap_or((f32::INFINITY, 0.0));
             sim_gaps.push((target, min_gap, closing_speed));
+
+            let err = (arena.get_ball_state().phys.vel
+                - Vec3A::from(recording.ticks[target].ball_record.lin_vel))
+            .length();
+            if err > peak_err {
+                peak_err = err;
+                peak_err_tick = target;
+            }
         }
 
         let bs = *arena.get_ball_state();
@@ -855,6 +900,36 @@ pub fn analyze_impulse_gap(recording: &Recording) {
             gap.z,
             gap.length(),
         );
+        // Machine-readable twin of the line above, for suite-wide aggregation
+        // (`scripts/rl_episode_gap.py`). Same convention as `LEDGER`: one line
+        // per measured unit, `key=value`, vectors comma-separated. Fields are
+        // append-only -- the aggregator reads them by name.
+        let game_hit_frames = (onset_start..=contact_end)
+            .step_by(stride)
+            .filter(|&i| has_hit(i))
+            .count();
+        println!(
+            "EPGAP {} cadence={} ep={onset_start}..{last_hit} win={start}..{end} \
+             contact_frames={} game_hit_frames={game_hit_frames} \
+             sim_contacts={} sim_fires={} \
+             gdv={:.4},{:.4},{:.4} sdv={:.4},{:.4},{:.4} \
+             gmag={:.4} smag={:.4} gap={:.4} peak_err={:.4} peak_tick={peak_err_tick}",
+            recording.name,
+            cadence_label(),
+            (contact_end - contact_start) / stride + 1,
+            sim_contact_ticks.len(),
+            sim_fire_ticks.len(),
+            game_dv.x,
+            game_dv.y,
+            game_dv.z,
+            sim_dv.x,
+            sim_dv.y,
+            sim_dv.z,
+            game_dv.length(),
+            sim_dv.length(),
+            gap.length(),
+            peak_err,
+        );
         gap_sum += gap;
         gap_mag_sum += gap.length();
         game_sum += game_dv;
@@ -864,7 +939,7 @@ pub fn analyze_impulse_gap(recording: &Recording) {
 
     if n == 0 {
         println!(
-            "[{}] HIT EPISODE GAP: no measurable episodes (unmeasurable={unmeasurable})",
+            "[{}] HIT EPISODE GAP: no measurable episodes (unmeasurable={unmeasurable}, no_ball={no_ball})",
             recording.name
         );
         return;
@@ -874,7 +949,7 @@ pub fn analyze_impulse_gap(recording: &Recording) {
     let s = sim_sum / nf;
     let gap = gap_sum / nf;
     println!(
-        "[{}] HIT EPISODE GAP (n={n}, unmeasurable={unmeasurable}): mean game Δv=({:>7.1},{:>7.1},{:>7.1}) | sim Δv=({:>7.1},{:>7.1},{:>7.1}) | mean gap=({:>7.1},{:>7.1},{:>7.1}) | mean |gap|={:.1}",
+        "[{}] HIT EPISODE GAP (n={n}, unmeasurable={unmeasurable}, no_ball={no_ball}): mean game Δv=({:>7.1},{:>7.1},{:>7.1}) | sim Δv=({:>7.1},{:>7.1},{:>7.1}) | mean gap=({:>7.1},{:>7.1},{:>7.1}) | mean |gap|={:.1}",
         recording.name,
         g.x,
         g.y,
