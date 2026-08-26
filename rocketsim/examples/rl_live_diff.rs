@@ -1,10 +1,13 @@
 //! Compare a scripted Rocket League TCP capture against this RocketSim build.
 
-use std::{cmp::Ordering, error::Error, fs, path::PathBuf};
+use std::{cmp::Ordering, collections::BTreeMap, error::Error, fs, path::PathBuf};
 
 use clap::Parser;
 use glam::EulerRot;
-use rocketsim::{Arena, ArenaConfig, CarBodyConfig, CarControls, GameMode, Mat3A, Team, Vec3A};
+use rocketsim::{
+    Arena, ArenaConfig, BallState, CarBodyConfig, CarControls, CarState, GameMode, Mat3A, Team,
+    Vec3A,
+};
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "cpp-compare")]
@@ -25,6 +28,18 @@ struct Args {
     /// Number of individual worst samples retained in the JSON output.
     #[arg(long, default_value_t = 25)]
     worst: usize,
+
+    /// Position error above which a trigger window is emitted.
+    #[arg(long, default_value_t = 1.0)]
+    position_threshold: f32,
+
+    /// Number of ticks included before a position-error trigger.
+    #[arg(long, default_value_t = 120)]
+    pre_ticks: usize,
+
+    /// Number of ticks included after a position-error trigger.
+    #[arg(long, default_value_t = 120)]
+    post_ticks: usize,
 
     /// Also replay through stock C++ RocketSim (requires `--features cpp-compare`).
     #[arg(long)]
@@ -163,6 +178,8 @@ struct LiveTick {
     #[serde(default)]
     c0ctl: Option<JsonControls>,
     #[serde(default)]
+    c0state: Option<LiveCarState>,
+    #[serde(default)]
     c1p: [f32; 3],
     #[serde(default)]
     c1v: [f32; 3],
@@ -176,6 +193,32 @@ struct LiveTick {
     c1bo: f32,
     #[serde(default)]
     c1ctl: Option<JsonControls>,
+    #[serde(default)]
+    c1state: Option<LiveCarState>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+struct LiveCarState {
+    #[serde(default)]
+    jumped: bool,
+    #[serde(default)]
+    double_jumped: bool,
+    #[serde(default)]
+    is_jumping: bool,
+    #[serde(default)]
+    is_flipping: bool,
+    #[serde(default)]
+    supersonic: bool,
+    #[serde(default)]
+    jump_time: f32,
+    #[serde(default)]
+    flip_time: f32,
+    #[serde(default)]
+    air_time: f32,
+    #[serde(default)]
+    air_time_since_jump: f32,
+    #[serde(default)]
+    dodge_torque: [f32; 3],
 }
 
 impl LiveTick {
@@ -189,6 +232,7 @@ impl LiveTick {
                 on_ground: self.c0og,
                 boost: self.c0bo,
                 controls: self.c0ctl,
+                state: self.c0state,
             },
             1 => LiveCar {
                 pos: &self.c1p,
@@ -198,6 +242,7 @@ impl LiveTick {
                 on_ground: self.c1og,
                 boost: self.c1bo,
                 controls: self.c1ctl,
+                state: self.c1state,
             },
             _ => unreachable!("the live logger currently supports at most two cars"),
         }
@@ -212,6 +257,7 @@ struct LiveCar<'a> {
     on_ground: bool,
     boost: f32,
     controls: Option<JsonControls>,
+    state: Option<LiveCarState>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -235,6 +281,15 @@ struct FieldSummary {
     max_tick: usize,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct Trigger {
+    tick: usize,
+    entity: String,
+    error: f32,
+    window_start: usize,
+    window_end: usize,
+}
+
 #[derive(Debug, Serialize)]
 struct DiffOutput {
     name: String,
@@ -243,6 +298,7 @@ struct DiffOutput {
     complete: bool,
     summary: Vec<FieldSummary>,
     worst: Vec<Sample>,
+    triggers: Vec<Trigger>,
     #[serde(skip_serializing_if = "Option::is_none")]
     cpp_summary: Option<Vec<FieldSummary>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -266,7 +322,12 @@ fn controls_by_tick(car: &InitialCar, ticks: usize) -> Vec<JsonControls> {
     result
 }
 
-fn rl_rotation(rot: &[f32; 3]) -> Mat3A {
+fn initial_rotation(rot: &[f32; 3]) -> Mat3A {
+    let [yaw, pitch, roll] = *rot;
+    Mat3A::from_euler(EulerRot::ZYX, yaw, pitch, roll)
+}
+
+fn response_rotation(rot: &[f32; 3]) -> Mat3A {
     const UE_TO_RAD: f32 = std::f32::consts::PI / 32768.0;
     let [pitch, yaw, roll] = *rot;
     Mat3A::from_euler(
@@ -275,6 +336,112 @@ fn rl_rotation(rot: &[f32; 3]) -> Mat3A {
         pitch * UE_TO_RAD,
         roll * UE_TO_RAD,
     )
+}
+
+fn validate_phase(response: &LiveResponse) -> Result<(), Box<dyn Error>> {
+    if response.schema_version != Some(9) {
+        return Err("capture must use schema_version 9".into());
+    }
+    if response.tick_rate != Some(120)
+        || response.state_phase.as_deref() != Some("active_tick_post_hook")
+        || response.control_phase.as_deref() != Some("set_vehicle_input_pre_hook")
+    {
+        return Err("capture tick rate or phase semantics are incompatible".into());
+    }
+    Ok(())
+}
+
+fn build_triggers(
+    samples: &[Sample],
+    threshold: f32,
+    pre_ticks: usize,
+    post_ticks: usize,
+    final_tick: usize,
+) -> Vec<Trigger> {
+    let mut by_entity: BTreeMap<&str, Vec<&Sample>> = BTreeMap::new();
+    for sample in samples
+        .iter()
+        .filter(|sample| sample.field == "pos" && sample.error > threshold)
+    {
+        by_entity.entry(&sample.entity).or_default().push(sample);
+    }
+
+    let mut triggers = Vec::new();
+    for (entity, mut events) in by_entity {
+        events.sort_by_key(|sample| sample.tick);
+        let mut run_start = 0;
+        while run_start < events.len() {
+            let mut run_end = run_start + 1;
+            let mut worst = events[run_start];
+            while run_end < events.len()
+                && events[run_end].tick <= events[run_end - 1].tick.saturating_add(1)
+            {
+                if events[run_end].error > worst.error {
+                    worst = events[run_end];
+                }
+                run_end += 1;
+            }
+            triggers.push(Trigger {
+                tick: worst.tick,
+                entity: entity.to_owned(),
+                error: worst.error,
+                window_start: events[run_start].tick.saturating_sub(pre_ticks).max(1),
+                window_end: events[run_end - 1]
+                    .tick
+                    .saturating_add(post_ticks)
+                    .min(final_tick),
+            });
+            run_start = run_end;
+        }
+    }
+    triggers.sort_by(|a, b| a.tick.cmp(&b.tick).then_with(|| a.entity.cmp(&b.entity)));
+    triggers
+}
+
+fn restore_initial_car(state: &mut CarState, initial: &InitialCar) {
+    *state = CarState::default();
+    state.phys.pos = vec3(&initial.p);
+    state.phys.vel = vec3(&initial.v);
+    state.phys.ang_vel = vec3(&initial.av);
+    state.phys.rot_mat = initial_rotation(&initial.rot);
+    state.is_on_ground = initial.og;
+    state.wheels_with_contact = [initial.og; 4];
+    state.has_jumped = initial.jumped;
+    state.has_double_jumped = initial.double_jumped;
+    state.is_supersonic = initial.supersonic;
+    state.boost = initial.boost;
+}
+
+fn restore_live_car(
+    state: &mut CarState,
+    live: LiveCar<'_>,
+    previous_controls: JsonControls,
+) -> Result<(), Box<dyn Error>> {
+    let logged = live
+        .state
+        .ok_or("schema-v9 capture tick is missing a car state")?;
+    *state = CarState::default();
+    state.phys.pos = vec3(live.pos);
+    state.phys.vel = vec3(live.vel);
+    state.phys.ang_vel = vec3(live.ang_vel);
+    state.phys.rot_mat = response_rotation(live.rot);
+    state.is_on_ground = live.on_ground;
+    state.wheels_with_contact = [live.on_ground; 4];
+    state.has_jumped = logged.jumped;
+    state.has_flipped = logged.double_jumped && logged.flip_time > 0.0;
+    state.has_double_jumped = logged.double_jumped && !state.has_flipped;
+    state.is_jumping = logged.is_jumping;
+    state.is_flipping = logged.is_flipping;
+    state.jump_ticks = (logged.jump_time * rocketsim::consts::TICK_RATE).round() as u32;
+    state.flip_time = logged.flip_time;
+    state.air_time = logged.air_time;
+    state.air_time_since_jump = logged.air_time_since_jump;
+    state.flip_rel_torque = vec3(&logged.dodge_torque);
+    state.is_supersonic = logged.supersonic;
+    state.boost = live.boost;
+    state.controls = previous_controls.into();
+    state.prev_controls = previous_controls.into();
+    Ok(())
 }
 
 fn rotation_error(predicted: Mat3A, expected: Mat3A) -> f32 {
@@ -403,7 +570,7 @@ fn evaluate_cpp(
     capture: &Capture,
     ticks: usize,
     request_controls: &[Vec<JsonControls>],
-) -> Vec<Sample> {
+) -> Result<Vec<Sample>, Box<dyn Error>> {
     rocketsim_rs::init(
         Some(concat!(env!("CARGO_MANIFEST_DIR"), "/collision_meshes")),
         true,
@@ -445,8 +612,7 @@ fn evaluate_cpp(
         state.pos = cpp_vec(&initial.p);
         state.vel = cpp_vec(&initial.v);
         state.ang_vel = cpp_vec(&initial.av);
-        let [yaw, pitch, roll] = initial.rot;
-        state.rot_mat = cpp_rotation(Mat3A::from_euler(EulerRot::ZYX, yaw, pitch, roll));
+        state.rot_mat = cpp_rotation(initial_rotation(&initial.rot));
         state.is_on_ground = initial.og;
         state.wheels_with_contact = [initial.og; 4];
         state.has_jumped = initial.jumped;
@@ -462,7 +628,49 @@ fn evaluate_cpp(
 
     let mut samples = Vec::new();
     for (offset, expected) in capture.response.ticks.iter().take(ticks).enumerate() {
+        if capture.request.ball.is_some() && offset > 0 {
+            let previous = &capture.response.ticks[offset - 1];
+            let mut state = arena.pin_mut().get_ball();
+            state.pos = cpp_vec(&previous.bp);
+            state.vel = cpp_vec(&previous.bv);
+            state.ang_vel = cpp_vec(&previous.ba);
+            arena.pin_mut().set_ball(state);
+        }
+
         for (index, &car_id) in car_ids.iter().enumerate() {
+            if offset > 0 {
+                let previous = capture.response.ticks[offset - 1].car(index);
+                let logged = previous
+                    .state
+                    .ok_or("schema-v9 capture tick is missing a car state")?;
+                let previous_controls = previous
+                    .controls
+                    .unwrap_or(request_controls[index][offset - 1]);
+                let mut state = arena.pin_mut().get_car(car_id);
+                state.pos = cpp_vec(previous.pos);
+                state.vel = cpp_vec(previous.vel);
+                state.ang_vel = cpp_vec(previous.ang_vel);
+                state.rot_mat = cpp_rotation(response_rotation(previous.rot));
+                state.is_on_ground = previous.on_ground;
+                state.wheels_with_contact = [previous.on_ground; 4];
+                state.has_jumped = logged.jumped;
+                state.has_flipped = logged.double_jumped && logged.flip_time > 0.0;
+                state.has_double_jumped = logged.double_jumped && !state.has_flipped;
+                state.is_jumping = logged.is_jumping;
+                state.is_flipping = logged.is_flipping;
+                state.jump_time = logged.jump_time;
+                state.flip_time = logged.flip_time;
+                state.air_time = logged.air_time;
+                state.air_time_since_jump = logged.air_time_since_jump;
+                state.flip_rel_torque = cpp_vec(&logged.dodge_torque);
+                state.is_supersonic = logged.supersonic;
+                state.boost = previous.boost;
+                state.last_controls = cpp_controls(previous_controls);
+                arena
+                    .pin_mut()
+                    .set_car(car_id, state)
+                    .expect("C++ car id vanished");
+            }
             let live = expected.car(index);
             let controls = live.controls.unwrap_or(request_controls[index][offset]);
             arena
@@ -538,7 +746,7 @@ fn evaluate_cpp(
                 expected.t,
                 &entity,
                 "rot",
-                rotation_error(rotation, rl_rotation(live.rot)),
+                rotation_error(rotation, response_rotation(live.rot)),
                 0.0,
             );
             add_scalar_sample(
@@ -559,13 +767,16 @@ fn evaluate_cpp(
             );
         }
     }
-    samples
+    Ok(samples)
 }
 
 fn evaluate(
     capture: Capture,
     worst_count: usize,
     run_cpp: bool,
+    position_threshold: f32,
+    pre_ticks: usize,
+    post_ticks: usize,
 ) -> Result<DiffOutput, Box<dyn Error>> {
     if !capture.response.ok {
         return Err("Rocket League response was not successful".into());
@@ -584,24 +795,7 @@ fn evaluate(
     if capture.request.ball.is_none() && capture.request.cars.is_empty() {
         return Err("scenario contains neither a ball nor a car".into());
     }
-    if capture.response.schema_version.is_none()
-        && (capture.response.tick_rate.is_some()
-            || capture.response.state_phase.is_some()
-            || capture.response.control_phase.is_some())
-    {
-        return Err("capture phase metadata requires a schema_version".into());
-    }
-    if let Some(version) = capture.response.schema_version {
-        if version < 8 {
-            return Err("capture schema metadata is present but older than v8".into());
-        }
-        if capture.response.tick_rate != Some(120)
-            || capture.response.state_phase.as_deref() != Some("post_physics")
-            || capture.response.control_phase.as_deref() != Some("pre_physics")
-        {
-            return Err("capture tick rate or phase semantics are incompatible".into());
-        }
-    }
+    validate_phase(&capture.response)?;
     for (offset, tick) in capture.response.ticks.iter().enumerate() {
         if tick.t != offset + 1 {
             return Err(format!(
@@ -609,6 +803,13 @@ fn evaluate(
                 tick.t
             )
             .into());
+        }
+        for index in 0..capture.response.num_cars {
+            if tick.car(index).state.is_none() {
+                return Err(
+                    format!("schema-v9 capture tick {} is missing c{index}state", tick.t).into(),
+                );
+            }
         }
     }
     if capture.response.ticks.len() > capture.request.ticks {
@@ -655,8 +856,7 @@ fn evaluate(
         state.phys.pos = vec3(&initial.p);
         state.phys.vel = vec3(&initial.v);
         state.phys.ang_vel = vec3(&initial.av);
-        let [yaw, pitch, roll] = initial.rot;
-        state.phys.rot_mat = Mat3A::from_euler(EulerRot::ZYX, yaw, pitch, roll);
+        state.phys.rot_mat = initial_rotation(&initial.rot);
         state.is_on_ground = initial.og;
         state.wheels_with_contact = [initial.og; 4];
         state.has_jumped = initial.jumped;
@@ -675,7 +875,35 @@ fn evaluate(
     let mut samples = Vec::new();
 
     for (offset, expected) in capture.response.ticks.iter().take(ticks).enumerate() {
+        if capture.request.ball.is_some() {
+            let mut state = BallState::default();
+            if offset == 0 {
+                let initial = capture.request.ball.as_ref().unwrap();
+                state.phys.pos = vec3(&initial.p);
+                state.phys.vel = vec3(&initial.v);
+                state.phys.ang_vel = vec3(&initial.av);
+            } else {
+                let previous = &capture.response.ticks[offset - 1];
+                state.phys.pos = vec3(&previous.bp);
+                state.phys.vel = vec3(&previous.bv);
+                state.phys.ang_vel = vec3(&previous.ba);
+            }
+            arena.set_ball_state(state);
+        }
+
         for (index, &car_index) in car_indices.iter().enumerate() {
+            let mut state = *arena.get_car_state(car_index);
+            if offset == 0 {
+                restore_initial_car(&mut state, &capture.request.cars[index]);
+            } else {
+                let previous = capture.response.ticks[offset - 1].car(index);
+                let previous_controls = previous
+                    .controls
+                    .unwrap_or(request_controls[index][offset - 1]);
+                restore_live_car(&mut state, previous, previous_controls)?;
+            }
+            arena.set_car_state(car_index, state);
+
             let live = expected.car(index);
             let controls = live.controls.unwrap_or(request_controls[index][offset]);
             arena.set_car_controls(car_index, controls.into());
@@ -744,7 +972,7 @@ fn evaluate(
                 expected.t,
                 &entity,
                 "rot",
-                rotation_error(predicted.phys.rot_mat, rl_rotation(expected_car.rot)),
+                rotation_error(predicted.phys.rot_mat, response_rotation(expected_car.rot)),
                 0.0,
             );
             add_scalar_sample(
@@ -766,12 +994,13 @@ fn evaluate(
         }
     }
 
+    let triggers = build_triggers(&samples, position_threshold, pre_ticks, post_ticks, ticks);
     let summary = summarize(&samples);
     let worst = rank_worst(samples, worst_count);
 
     #[cfg(feature = "cpp-compare")]
     let (cpp_summary, cpp_worst) = if run_cpp {
-        let cpp_samples = evaluate_cpp(&capture, ticks, &request_controls);
+        let cpp_samples = evaluate_cpp(&capture, ticks, &request_controls)?;
         (
             Some(summarize(&cpp_samples)),
             Some(rank_worst(cpp_samples, worst_count)),
@@ -798,6 +1027,7 @@ fn evaluate(
         complete: ticks == requested_ticks,
         summary,
         worst,
+        triggers,
         cpp_summary,
         cpp_worst,
     })
@@ -807,7 +1037,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
     let input = fs::read_to_string(args.input)?;
     let capture: Capture = serde_json::from_str(&input)?;
-    let output = evaluate(capture, args.worst, args.cpp)?;
+    let output = evaluate(
+        capture,
+        args.worst,
+        args.cpp,
+        args.position_threshold,
+        args.pre_ticks,
+        args.post_ticks,
+    )?;
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
 }
@@ -851,6 +1088,80 @@ mod tests {
     }
 
     #[test]
+    fn coalesces_adjacent_position_triggers_and_expands_windows() {
+        let samples = [
+            Sample {
+                tick: 10,
+                entity: "car_0".to_owned(),
+                field: "pos",
+                error: 2.0,
+                predicted: vec![],
+                expected: vec![],
+            },
+            Sample {
+                tick: 11,
+                entity: "car_0".to_owned(),
+                field: "pos",
+                error: 3.0,
+                predicted: vec![],
+                expected: vec![],
+            },
+            Sample {
+                tick: 13,
+                entity: "car_0".to_owned(),
+                field: "pos",
+                error: 4.0,
+                predicted: vec![],
+                expected: vec![],
+            },
+            Sample {
+                tick: 11,
+                entity: "ball".to_owned(),
+                field: "pos",
+                error: 5.0,
+                predicted: vec![],
+                expected: vec![],
+            },
+        ];
+
+        let triggers = build_triggers(&samples, 1.0, 3, 4, 15);
+        assert_eq!(triggers.len(), 3);
+        assert_eq!(triggers[0].tick, 11);
+        assert_eq!(triggers[0].entity, "ball");
+        assert_eq!(triggers[0].window_start, 8);
+        assert_eq!(triggers[0].window_end, 15);
+        assert_eq!(triggers[1].tick, 11);
+        assert_eq!(triggers[1].entity, "car_0");
+        assert_eq!(triggers[1].error, 3.0);
+        assert_eq!(triggers[1].window_start, 7);
+        assert_eq!(triggers[1].window_end, 15);
+        assert_eq!(triggers[2].tick, 13);
+        assert_eq!(triggers[2].window_start, 10);
+        assert_eq!(triggers[2].window_end, 15);
+    }
+
+    #[test]
+    fn accepts_only_current_logger_phase_metadata() {
+        let mut response = LiveResponse {
+            ok: true,
+            schema_version: Some(9),
+            tick_rate: Some(120),
+            state_phase: Some("active_tick_post_hook".to_owned()),
+            control_phase: Some("set_vehicle_input_pre_hook".to_owned()),
+            name: String::new(),
+            num_cars: 0,
+            ticks: vec![],
+        };
+        assert!(validate_phase(&response).is_ok());
+
+        response.state_phase = Some("post_physics".to_owned());
+        assert!(validate_phase(&response).is_err());
+        response.state_phase = Some("active_tick_post_hook".to_owned());
+        response.schema_version = Some(8);
+        assert!(validate_phase(&response).is_err());
+    }
+
+    #[test]
     fn evaluates_a_ball_only_capture() {
         let capture = Capture {
             request: Scenario {
@@ -865,10 +1176,10 @@ mod tests {
             },
             response: LiveResponse {
                 ok: true,
-                schema_version: Some(8),
+                schema_version: Some(9),
                 tick_rate: Some(120),
-                state_phase: Some("post_physics".to_owned()),
-                control_phase: Some("pre_physics".to_owned()),
+                state_phase: Some("active_tick_post_hook".to_owned()),
+                control_phase: Some("set_vehicle_input_pre_hook".to_owned()),
                 name: "unit".to_owned(),
                 num_cars: 0,
                 ticks: vec![LiveTick {
@@ -883,6 +1194,7 @@ mod tests {
                     c0og: false,
                     c0bo: 0.0,
                     c0ctl: None,
+                    c0state: None,
                     c1p: [0.0; 3],
                     c1v: [0.0; 3],
                     c1a: [0.0; 3],
@@ -890,11 +1202,12 @@ mod tests {
                     c1og: false,
                     c1bo: 0.0,
                     c1ctl: None,
+                    c1state: None,
                 }],
             },
         };
 
-        let output = evaluate(capture, 5, cfg!(feature = "cpp-compare")).unwrap();
+        let output = evaluate(capture, 5, cfg!(feature = "cpp-compare"), 1.0, 120, 120).unwrap();
         assert_eq!(output.ticks, 1);
         assert!(output.complete);
         assert_eq!(output.summary.len(), 3);
